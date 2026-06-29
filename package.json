@@ -1,0 +1,28 @@
+{
+  "name": "music-hub",
+  "version": "0.1.0",
+  "description": "HTTP/MCP API service for LX Music source capabilities.",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "music-hub": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "start:http": "node src/index.js http",
+    "start:mcp": "node src/index.js mcp",
+    "start:all": "node src/index.js all",
+    "test": "node --test \"test/*.test.js\"",
+    "check": "node --check src/index.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "lx-music",
+    "music",
+    "api",
+    "mcp"
+  ]
+}

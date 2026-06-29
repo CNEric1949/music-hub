@@ -1,2 +1,296 @@
 # music-hub
-一个基于洛雪音乐源的API服务，目标支持HTTP/MCP/ACP协议。
+一个基于洛雪音乐源能力的服务端 API 项目，不提供 Web UI，首期目标支持 HTTP/MCP 协议。
+
+项目参考原始项目 [lyswhut/lx-music-desktop](https://github.com/lyswhut/lx-music-desktop) 的非 UI 能力，对音乐源、搜索、歌词、封面、下载和元数据处理进行服务端封装。ACP 协议支持列入 TODO。
+
+感谢 [lyswhut](https://github.com/lyswhut) 及 [lx-music-desktop](https://github.com/lyswhut/lx-music-desktop) 项目长期沉淀的实现、协议设计和社区贡献。本项目会尽量遵循原始项目的使用边界与声明要求。
+
+## 重要声明
+
+- 本项目仅用于学习、研究与个人合法使用，不提供音乐资源，不提供音乐下载服务，不以任何方式盈利。
+- 本项目不内置任何第三方音乐平台数据或资源，不承诺绕过版权限制。用户自行配置的音源、接口和使用行为，应由用户自行确认合法性并承担相应责任。
+- 请在遵守所在地法律法规、平台服务条款和版权要求的前提下使用本项目。
+- 本项目遵循原始项目 [lyswhut/lx-music-desktop](https://github.com/lyswhut/lx-music-desktop) 的相关声明与补充协议要求；如两者存在理解差异，请以原始项目声明的更严格约束为准。
+- 本项目代码编写 100% Vibe Coding。
+
+## 能力范围
+
+首期聚焦：
+
+- 音乐源管理：新增、删除、修改、查看、启用、禁用、重载、本地导入、在线导入。
+- 音乐源状态：支持多音源同时初始化，返回初始化状态、能力、支持平台、支持音质和升级提示。
+- 音乐搜索：支持指定平台搜索和全平台统一搜索。
+- 音乐 URL：支持指定平台/全平台、指定音质/全部音质获取。
+- 歌词与封面：支持获取、保存和下载后处理。
+- 下载任务：支持创建、查询、暂停、恢复、取消、重试、断点续传和任务状态持久化。
+- 元数据处理：按下载预设处理歌词、封面和基础元数据。
+- 专辑、歌手、歌曲详情：支持的平台返回数据，不支持的平台返回明确业务码。
+- HTTP 与 MCP 适配。
+
+首期支持平台：
+
+| 源 ID | 平台 |
+| --- | --- |
+| `kw` | 酷我音乐 |
+| `kg` | 酷狗音乐 |
+| `tx` | QQ 音乐 |
+| `wy` | 网易云音乐 |
+| `mg` | 咪咕音乐 |
+
+`xm`、`bd` 不纳入支持范围。
+
+不做的事情：
+
+- 不做 Web UI、桌面播放器、本地音乐库扫描。
+- 不做桌面歌词、媒体会话、播放状态同步。
+- 不做用户歌单同步。
+- 不执行音乐源自动升级或手动升级；只保留升级提示状态。
+
+## 开发
+
+```bash
+npm test
+npm run start:all
+```
+
+默认 HTTP 地址为 `http://127.0.0.1:3000`，MCP 地址为 `http://127.0.0.1:3100/mcp`。
+
+HTTP API 文档地址为 `http://127.0.0.1:3000/api-docs`，OpenAPI JSON 地址为 `http://127.0.0.1:3000/openapi.json`。
+
+MCP Tool 文档地址为 `http://127.0.0.1:3100/mcp/docs`，Tool JSON 地址为 `http://127.0.0.1:3100/mcp/tools`。MCP 标准客户端也可以通过 `tools/list` 获取带 `inputSchema` 的工具说明。
+
+## 配置与日志
+
+默认配置见 `config.example.json`。运行时会自动扫描 `data/sources/*.js` 加载 LX 用户源脚本。
+
+日志默认写入 `data/logs/music-hub.log`，可通过 `MUSIC_HUB_LOGS_DIR` 调整日志目录。下载目录默认是 `data/downloads`，可通过 `MUSIC_HUB_DOWNLOAD_DIR` 调整。
+
+配置加载顺序：默认值 < 配置文件 < 环境变量。
+
+常用环境变量：
+
+| 环境变量 | 说明 |
+| --- | --- |
+| `MUSIC_HUB_CONFIG` | 配置文件路径 |
+| `MUSIC_HUB_HOST` | HTTP 服务监听地址 |
+| `MUSIC_HUB_PORT` | HTTP 服务端口 |
+| `MUSIC_HUB_MCP_HOST` | MCP 服务监听地址 |
+| `MUSIC_HUB_MCP_PORT` | MCP 服务端口 |
+| `MUSIC_HUB_DATA_DIR` | 数据目录 |
+| `MUSIC_HUB_SOURCES_DIR` | 音源脚本目录 |
+| `MUSIC_HUB_DOWNLOAD_DIR` | 下载目录 |
+| `MUSIC_HUB_CACHE_DIR` | 缓存目录 |
+| `MUSIC_HUB_LOGS_DIR` | 日志目录 |
+| `MUSIC_HUB_SOURCES_MULTI_ENABLED` | 是否同时初始化多个自定义音源，默认 `true` |
+
+## HTTP API
+
+HTTP API 默认监听 `MUSIC_HUB_HOST`/`MUSIC_HUB_PORT`。
+
+```bash
+npm run start:http
+curl http://127.0.0.1:3000/health
+curl http://127.0.0.1:3000/sources
+```
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/health` | 健康检查 |
+| `GET` | `/sources` | 音源列表 |
+| `POST` | `/sources` | 新增音源，支持 `code`、`filePath`、`url` |
+| `GET` | `/sources/:id` | 查询单个音源 |
+| `PATCH` | `/sources/:id` | 修改音源配置 |
+| `DELETE` | `/sources/:id` | 删除音源 |
+| `POST` | `/sources/reload` | 重载音源 |
+| `POST` | `/sources/:id/enable` | 启用音源 |
+| `POST` | `/sources/:id/disable` | 禁用音源 |
+| `POST` | `/sources/:id/check-update` | 查询音源升级提示状态 |
+| `POST` | `/music/search` | 搜索歌曲 |
+| `POST` | `/music/match` | 跨源匹配歌曲 |
+| `POST` | `/music/url` | 获取音乐 URL；不指定平台时尝试所有平台，不指定音质时返回所有可用音质 |
+| `POST` | `/music/urls` | 兼容旧接口，等价于 `/music/url` 的多音质语义 |
+| `POST` | `/albums/detail` | 获取专辑详情 |
+| `POST` | `/singers/detail` | 获取歌手详情 |
+| `POST` | `/music/detail` | 获取歌曲详情 |
+| `POST` | `/lyrics/get` | 获取歌词 |
+| `POST` | `/lyrics/save` | 保存歌词文件 |
+| `POST` | `/covers/get` | 获取封面 URL |
+| `POST` | `/covers/download` | 下载封面文件 |
+| `POST` | `/downloads` | 创建下载任务 |
+| `GET` | `/downloads` | 查询任务列表 |
+| `GET` | `/downloads/:id` | 查询任务状态 |
+| `POST` | `/downloads/:id/pause` | 暂停任务 |
+| `POST` | `/downloads/:id/resume` | 恢复任务 |
+| `POST` | `/downloads/:id/cancel` | 取消任务 |
+| `POST` | `/downloads/:id/retry` | 重试任务 |
+| `POST` | `/metadata/embed` | 对已有文件嵌入歌词/封面 |
+| `GET` | `/api-docs` | Swagger UI API 文档 |
+| `GET` | `/openapi.json` | OpenAPI JSON |
+
+暂时不做接口鉴权，鉴权列入 TODO。
+
+## MCP Tools
+
+MCP 默认监听 `MUSIC_HUB_MCP_HOST`/`MUSIC_HUB_MCP_PORT`，入口为：
+
+```text
+POST /mcp
+```
+
+支持 JSON-RPC 风格方法：
+
+- `tools/list`
+- `tools/call`
+
+示例：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list"
+}
+```
+
+当前 Tools：
+
+| Tool | 说明 |
+| --- | --- |
+| `list_music_sources` | 列出音源及能力 |
+| `get_music_source` | 查询单个音源 |
+| `create_music_source` | 新增音源 |
+| `update_music_source` | 修改音源 |
+| `delete_music_source` | 删除音源 |
+| `reload_music_sources` | 重载音源 |
+| `check_music_source_update` | 查询音源升级提示状态 |
+| `search_music` | 搜索音乐 |
+| `match_music` | 跨源匹配歌曲 |
+| `get_music_url` | 获取歌曲 URL，支持单音质、多音质、指定平台、全平台 |
+| `get_music_urls` | 兼容旧 Tool，等价于 `get_music_url` 的多音质语义 |
+| `get_album_detail` | 获取专辑详情 |
+| `get_singer_detail` | 获取歌手详情 |
+| `get_music_detail` | 获取歌曲详情 |
+| `get_lyric` | 获取歌词 |
+| `get_cover` | 获取封面 URL |
+| `create_download_task` | 创建下载任务 |
+| `get_download_task` | 查询下载任务状态 |
+| `embed_music_metadata` | 嵌入歌词/封面 |
+
+MCP 接口说明以 `tools/list` 返回的 `description` 与 `inputSchema` 为准。MCP 服务同时提供便于人工查看的 `GET /mcp/tools` JSON 与 `GET /mcp/docs` HTML 页面；这不是 MCP 协议标准要求，但便于调试。
+
+## 错误结构
+
+错误响应使用统一结构：
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "SOURCE_CAPABILITY_UNSUPPORTED",
+    "message": "Source does not support capability: album",
+    "details": {}
+  }
+}
+```
+
+当前错误码覆盖：
+
+- `SOURCE_NOT_FOUND`
+- `SOURCE_DISABLED`
+- `SOURCE_CAPABILITY_UNSUPPORTED`
+- `SOURCE_UPDATE_FAILED`
+- `SOURCE_SCRIPT_ERROR`
+- `MUSIC_NOT_FOUND`
+- `QUALITY_UNSUPPORTED`
+- `DOWNLOAD_TASK_NOT_FOUND`
+- `DOWNLOAD_PATH_INVALID`
+- `DOWNLOAD_RESUME_FAILED`
+- `METADATA_EMBED_FAILED`
+- `VALIDATION_ERROR`
+
+## 合规说明
+
+- 本项目仅用于学习、研究与个人合法使用。
+- 调用第三方音乐平台接口时应遵守对应平台服务条款与版权要求。
+- 项目不内置侵权内容，不承诺绕过版权限制。
+- 自定义音源由用户自行配置，项目提供安全边界和免责声明。
+- 下载能力应结合鉴权、网络边界和用户配置谨慎开放，避免被滥用。
+
+## 实现与验证跟踪
+
+状态说明：`已实现` 表示已有代码路径和接口；`部分实现` 表示有基础能力但未达到需求完整语义；`未实现` 表示目前没有可用实现。验证状态以当前自动化测试和本地真实音源验证为准。
+
+当前测试使用真实 LX 用户源文件进行验证。真实搜索验证歌曲：`海阔天空`。
+
+| 功能/需求 | HTTP API | MCP Tool | 实现情况 | 验证情况 | 备注/缺口 |
+| --- | --- | --- | --- | --- | --- |
+| 健康检查 | `GET /health` | 无 | 已实现 | 已验证 | 已通过 HTTP handler 验证；未验证端口监听。 |
+| 音乐源列表与能力查询 | `GET /sources` | `list_music_sources` | 已实现 | 已验证 | 已验证真实 LX 用户源自动加载，并输出支持平台与音质。 |
+| 单个音乐源查询 | `GET /sources/:id` | `get_music_source` | 已实现 | 已验证 | 已验证 HTTP 与 MCP 查询真实音源详情。 |
+| 自定义音乐源自动发现 | 无独立 API | 无独立 Tool | 已实现 | 已验证 | 启动时扫描 `data/sources/*.js`，当前验证两个真实 LX 用户源文件。 |
+| 自定义音乐源 LX 协议兼容 | 通过源管理/媒体 API 间接使用 | 通过源管理/媒体 Tool 间接使用 | 部分实现 | 已验证加载 | 已支持 `lx.request/on/send`、`EVENT_NAMES.inited/request/updateAlert`、crypto/buffer/zlib；只验证了当前真实源初始化。 |
+| 音乐源新增 | `POST /sources` | `create_music_source` | 已实现 | 已验证 | 支持 `code`、`filePath`、`url` 三种导入；已验证本地上传式导入和在线 URL 导入。 |
+| 音乐源修改 | `PATCH /sources/:id` | `update_music_source` | 已实现 | 已验证 | 支持更新配置，也支持用 `code/filePath/url` 覆盖脚本。 |
+| 音乐源删除 | `DELETE /sources/:id` | `delete_music_source` | 已实现 | 已验证 | 删除后从运行列表、注册表和音源目录移除；不保留历史版本，不提供回滚。 |
+| 音乐源启用/禁用 | `POST /sources/:id/enable`, `POST /sources/:id/disable` | 无 | 已实现 | 已验证 | 已验证 HTTP 启用/禁用真实音源；MCP 还未暴露 enable/disable Tool。 |
+| 音乐源重载 | `POST /sources/reload` | `reload_music_sources` | 已实现 | 已验证 | 已验证 HTTP 与 MCP 重载真实音源。 |
+| 音乐源升级提示 | `GET /sources`, `GET /sources/:id`, `POST /sources/:id/check-update` | `check_music_source_update` | 已实现 | 已验证 | 不执行升级；捕获 LX `updateAlert`，返回是否可升级、提示文案、更新 URL 等信息。 |
+| 多音源同时初始化 | 配置项 | 无 | 已实现 | 已验证 | `sources.multiSourceEnabled` 默认 `true`；关闭时只初始化一个自定义音源，其余为 `inactive`。 |
+| 指定平台音乐搜索 | `POST /music/search` | `search_music` | 已实现 | 已验证 | 已用真实歌曲 `海阔天空` 分别验证 `kg/kw/mg/tx/wy` 搜索成功。 |
+| 全平台统一搜索 | `POST /music/search` with `source: "all"` | `search_music` | 已实现 | 已验证 | 已验证 HTTP 全平台聚合包含 `kg/kw/mg/tx/wy`；MCP 已验证指定平台搜索。 |
+| 搜索分页/limit | `POST /music/search` | `search_music` | 已实现 | 部分验证 | 已验证 `page=1, limit=5`；未覆盖更多分页场景。 |
+| 搜索失败隔离 | `POST /music/search` | `search_music` | 已实现 | 未验证 | 代码会返回 `failures`，未构造失败源验证。 |
+| 跨源匹配 | `POST /music/match` | `match_music` | 已实现 | 已验证 | 已用真实搜索结果验证 HTTP 匹配接口返回候选列表。 |
+| 获取音乐 URL | `POST /music/url` | `get_music_url` | 部分实现 | 已验证 | 合并单音质/多音质/跨平台解析；指定 `source/platform` 与 `quality/type` 时返回单 URL，不指定平台时尝试全平台。 |
+| 获取全部音质音乐 URL 兼容接口 | `POST /music/urls` | `get_music_urls` | 部分实现 | 已验证 | 兼容旧接口，内部转到 `/music/url` 的多音质语义；后续可标记 deprecated。 |
+| 指定源/全源下载策略 | `POST /downloads` | `create_download_task` | 部分实现 | 部分验证 | 已验证 HTTP/MCP 创建任务与本地 `file:` 下载完成；真实音乐文件下载和 `sourceStrategy: all` 未验证。 |
+| 下载品质策略 | `POST /downloads` | `create_download_task` | 已实现 | 部分验证 | 支持 `qualityStrategy: specified/highest/lowest`；测试覆盖指定品质任务，未覆盖最高/最低自动选择。 |
+| 下载任务创建 | `POST /downloads` | `create_download_task` | 已实现 | 已验证 | 已验证 HTTP 和 MCP 创建等待状态任务。 |
+| 下载任务列表 | `GET /downloads` | 无 | 已实现 | 已验证 | 已验证 HTTP 列表；MCP 未暴露列表 Tool。 |
+| 下载任务详情 | `GET /downloads/:id` | `get_download_task` | 已实现 | 已验证 | 已验证 HTTP 与 MCP 任务详情。 |
+| 下载任务暂停 | `POST /downloads/:id/pause` | 无 | 已实现 | 已验证 | 已验证 HTTP 暂停等待任务；MCP 未暴露 pause Tool。 |
+| 下载任务恢复/断点续传 | `POST /downloads/:id/resume` | 无 | 部分实现 | 部分验证 | 已用本地 `file:` URL 验证断点续写完成；HTTP Range 与异常重启恢复未验证。 |
+| 下载任务取消 | `POST /downloads/:id/cancel` | 无 | 已实现 | 已验证 | 已验证 HTTP 取消任务；MCP 未暴露 cancel Tool。 |
+| 下载任务重试 | `POST /downloads/:id/retry` | 无 | 已实现 | 未验证 | MCP 未暴露 retry Tool。 |
+| 下载目录配置 | 配置/环境变量 | 无 | 已实现 | 已验证 | 测试通过 `MUSIC_HUB_DOWNLOAD_DIR` 指向临时目录并完成下载。 |
+| 日志落盘 | 配置/环境变量 | 无 | 已实现 | 已验证 | 默认 `data/logs/music-hub.log`，测试使用 `MUSIC_HUB_LOGS_DIR`。 |
+| 歌词获取 | `POST /lyrics/get` | `get_lyric` | 部分实现 | 已验证基础接口 | 已验证 HTTP 获取歌词对象；真实平台歌词移植未完成。 |
+| 歌词保存 | `POST /lyrics/save` | 无 | 部分实现 | 部分验证 | 已通过下载后处理验证 `.lrc` 文件落盘；独立保存接口未覆盖。 |
+| 歌词合并策略 | 下载完成后配置驱动 | 无 | 部分实现 | 部分验证 | 已验证下载完成后按配置保存歌词；翻译/罗马音/LX 合并细节未完整覆盖。 |
+| 封面 URL 获取 | `POST /covers/get` | `get_cover` | 部分实现 | 已验证基础接口 | 已验证 HTTP 获取封面 URL 字段；真实封面下载未覆盖。 |
+| 封面下载 | `POST /covers/download` | 无 | 已实现 | 未验证 | 支持按 URL 下载到下载目录；未真实验证。 |
+| 下载后歌词/封面处理 | 下载任务配置 | 无 | 部分实现 | 部分验证 | 下载完成后可保存歌词、各类歌词变体、封面文件并写元数据 sidecar；真实封面下载未验证。 |
+| 元数据嵌入 | `POST /metadata/embed` | `embed_music_metadata` | 部分实现 | 已验证 | 已验证 HTTP 写 sidecar JSON；当前不是真实 MP3/FLAC 标签嵌入。 |
+| 专辑详情 | `POST /albums/detail` | `get_album_detail` | 部分实现 | 未验证 | 路由和能力码存在；真实平台详情未移植完成。 |
+| 歌手详情 | `POST /singers/detail` | `get_singer_detail` | 部分实现 | 未验证 | 路由和能力码存在；真实平台详情未移植完成。 |
+| 歌曲详情 | `POST /music/detail` | `get_music_detail` | 部分实现 | 未验证 | 路由和能力码存在；真实平台详情未移植完成。 |
+| 不支持能力业务码 | 多个 API | 多个 Tool | 已实现 | 已验证 | 已验证 HTTP 在不支持平台专辑详情时返回 `SOURCE_CAPABILITY_UNSUPPORTED`。 |
+| HTTP API 服务 | 所有 HTTP 路由 | 不适用 | 已实现 | 部分验证 | 已通过 handler 自动化验证；端口监听型端到端测试未覆盖。 |
+| HTTP API 文档 | `GET /api-docs`, `GET /openapi.json` | 无 | 已实现 | 已验证 | `/api-docs` 提供 Swagger UI，OpenAPI JSON 包含主要入参、返回值、错误结构和字段说明；Swagger UI 静态资源依赖 CDN。 |
+| MCP 服务 | 不适用 | `tools/list`, `tools/call` | 部分实现 | 已验证 | 已直接调用 MCP handler 验证 `tools/list` 与 `tools/call`；`tools/list` 已返回每个 Tool 的 `inputSchema`。 |
+| MCP Tool 文档 | 不适用 | `GET /mcp/tools`, `GET /mcp/docs` | 已实现 | 已验证 | 仅 MCP 服务端口提供 MCP Tool JSON 和简易 HTML 文档页；MCP 标准入口仍是 `tools/list`。 |
+| MCP 音源 CRUD | 不适用 | `list/get/create/update/delete/reload/check_music_source_update` | 部分实现 | 部分验证 | 已验证 list/get/update/delete/reload/check；缺少 enable/disable Tool。 |
+| 鉴权 | 无 | 无 | 未实现 | 未验证 | 按需求列入 TODO。 |
+| ACP 协议 | 无 | 无 | 未实现 | 未验证 | 按需求列入 TODO。 |
+| Docker 部署适配 | 配置/环境变量 | 无 | 部分实现 | 未验证 | 路径可通过环境变量配置；尚无 Dockerfile/compose 验证。 |
+
+### 当前自动化验证
+
+```bash
+npm test
+npm run check
+```
+
+`npm test` 当前覆盖：
+
+- 自动加载 `data/sources/*.js` 中的真实 LX 用户源。
+- 按功能拆分测试文件：`test/sources.test.js`、`test/music.test.js`、`test/downloads.test.js`、`test/docs.test.js`、`test/metadata.test.js`、`test/health.test.js`。
+- 输出真实音源支持的平台和音质。
+- 使用真实歌曲名 `海阔天空` 分别搜索 `kg/kw/mg/tx/wy`。
+- 验证 HTTP handler 的健康检查、音源列表/详情/启用/禁用/重载/升级提示、搜索、匹配、合并后的音乐 URL、下载任务、歌词、封面、元数据、API 文档和不支持能力业务码。
+- 验证 MCP handler 的 `tools/list`、音源查询/列表/更新/删除/重载/升级检查、搜索、音乐 URL、多音质 URL、创建下载任务、下载任务详情。
+- 验证音乐源本地导入、在线导入、多音源同时初始化、单音源初始化模式，以及可升级源的升级提示信息。
+- 验证 MCP `tools/list` 的 `inputSchema`、`/mcp/tools` Tool JSON 和 `/mcp/docs` 文档页。
+- 使用本地 `file:` 音频文件验证下载任务断点续写完成、下载目录环境变量、下载后歌词文件与元数据 sidecar 落盘。
+
+由于测试依赖真实外部音源与音乐平台接口，离线环境或 DNS 受限环境可能失败或跳过。

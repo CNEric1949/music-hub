@@ -1,0 +1,9 @@
+# Runtime data
+data/
+downloads/
+cache/
+logs/
+
+# Dependencies and logs
+node_modules/
+*.log
