@@ -56,11 +56,12 @@ export class DownloadService {
       id: randomUUID(),
       status: 'waiting',
       musicInfo: options.songInfo || options.musicInfo,
-      quality: options.quality || '320k',
-      qualityStrategy: options.qualityStrategy || 'specified',
-      sourceStrategy: options.sourceStrategy || 'specified',
+      quality: this.config.download.quality || '320k',
+      qualityStrategy: this.config.download.qualityStrategy || 'specified',
+      sourceStrategy: this.config.download.sourceStrategy || 'specified',
       url: options.url || null,
       filePath: '',
+      customFileName: Boolean(options.fileName),
       artifacts: {},
       progress: { total: 0, downloaded: 0, percent: 0, speed: 0 },
       options: { ...this.config.download, ...(options.options || {}) },
@@ -162,12 +163,19 @@ export class DownloadService {
         const result = await this.mediaService.getMusicUrl(item, quality);
         task.musicInfo = item;
         task.quality = result.type || quality;
+        if (!task.customFileName) task.filePath = this.defaultFilePath(task);
         return result.url;
       } catch (error) {
         this.logger.warn(`URL resolve failed for ${item.source}: ${error.message}`);
       }
     }
     throw new AppError(ERROR_CODES.MUSIC_NOT_FOUND, 'No downloadable URL found', {}, 404);
+  }
+
+  defaultFilePath(task) {
+    const ext = extForQuality(task.quality);
+    const fileName = sanitizeFileName(`${task.musicInfo.name || task.musicInfo.songmid || task.id} - ${task.musicInfo.singer || 'unknown'}.${ext}`);
+    return safeJoin(this.config.paths.downloadDir, fileName);
   }
 
   async download(task) {

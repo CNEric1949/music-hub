@@ -31,8 +31,26 @@ const parseScriptInfo = (code, fileName) => {
     version: pick('version') || '1.0.0',
     author: pick('author') || '',
     homepage: pick('homepage') || '',
-    updateUrl: pick('updateUrl') || ''
+    updateUrl: pick('updateUrl') || '',
+    rawScript: code
   };
+};
+
+const normalizeRequestResponse = response => ({
+  statusCode: response.statusCode,
+  status: response.statusCode,
+  statusMessage: response.statusMessage || '',
+  headers: response.headers,
+  body: response.body,
+  raw: response.raw,
+  bytes: Buffer.isBuffer(response.raw) ? response.raw.length : Buffer.byteLength(String(response.body ?? ''))
+});
+
+const hasModuleExports = sandbox => {
+  const exported = sandbox.module?.exports;
+  if (!exported) return false;
+  if (typeof exported === 'function') return true;
+  return exported !== sandbox.exports || Object.keys(exported).length > 0;
 };
 
 export const loadCustomSourceScript = async ({ code, fileName, logger, initTimeoutMs = 5000, onUpdateAlert = null }) => {
@@ -56,9 +74,11 @@ export const loadCustomSourceScript = async ({ code, fileName, logger, initTimeo
       sourceApi = payload;
       resolveInited(payload);
     } else if (event === eventNames.updateAlert) {
-      updateAlerts.push(payload);
-      onUpdateAlert?.(payload, currentScriptInfo);
-      logger?.info?.(`[${fileName}] source update alert`, payload);
+      if (!updateAlerts.length && payload && payload.updateUrl && String(payload.updateUrl).length < 1024) {
+        updateAlerts.push(payload);
+        onUpdateAlert?.(payload, currentScriptInfo);
+        logger?.info?.(`[${fileName}] source update alert`, payload);
+      }
     }
     const handler = listeners.get(event);
     if (handler) handler(payload);
@@ -70,17 +90,9 @@ export const loadCustomSourceScript = async ({ code, fileName, logger, initTimeo
 
   const request = (url, options = {}, callback) => {
     let canceled = false;
-    httpFetch(url, options)
+    const pending = httpFetch(url, options)
       .then(response => {
-        if (!canceled) callback?.(null, {
-          statusCode: response.statusCode,
-          status: response.statusCode,
-          statusMessage: response.statusMessage || '',
-          headers: response.headers,
-          body: response.body,
-          raw: response.raw,
-          bytes: Buffer.isBuffer(response.raw) ? response.raw.length : Buffer.byteLength(String(response.body ?? ''))
-        });
+        if (!canceled) callback?.(null, normalizeRequestResponse(response), response.body);
       })
       .catch(error => {
         if (!canceled) callback?.(error, {
@@ -95,9 +107,11 @@ export const loadCustomSourceScript = async ({ code, fileName, logger, initTimeo
       });
     return () => {
       canceled = true;
+      pending.cancel?.();
     };
   };
 
+  const module = { exports: {} };
   const sandbox = vm.createContext({
     console: {
       log: (...args) => logger?.info?.(...args),
@@ -149,7 +163,9 @@ export const loadCustomSourceScript = async ({ code, fileName, logger, initTimeo
     EVENT_NAMES: eventNames,
     request,
     on,
-    send
+    send,
+    module,
+    exports: module.exports
   });
   sandbox.globalThis = sandbox;
   sandbox.globalThis.lx = sandbox.lx;
@@ -177,6 +193,8 @@ export const loadCustomSourceScript = async ({ code, fileName, logger, initTimeo
   try {
     script.runInContext(sandbox, { timeout: 5000 });
 
+    if (!sourceApi && hasModuleExports(sandbox)) sourceApi = sandbox.module.exports;
+
     if (!sourceApi) {
       await Promise.race([
         inited,
@@ -185,7 +203,7 @@ export const loadCustomSourceScript = async ({ code, fileName, logger, initTimeo
     }
 
     if (!sourceApi) {
-      if (sandbox.module?.exports) sourceApi = sandbox.module.exports;
+      if (hasModuleExports(sandbox)) sourceApi = sandbox.module.exports;
       else if (sandbox.exports) sourceApi = sandbox.exports;
     }
 

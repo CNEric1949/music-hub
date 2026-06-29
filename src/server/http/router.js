@@ -50,6 +50,8 @@ const match = (method, pathname, pattern) => {
 export const createHttpHandler = app => {
   const routes = [
     { method: 'GET', path: '/health', handler: async () => ({ status: 'ok' }) },
+    { method: 'GET', path: '/config', handler: async () => app.configService.getPublic() },
+    { method: 'PATCH', path: '/config', handler: async ({ body }) => app.configService.update(body) },
     { method: 'GET', path: '/sources', handler: async () => app.sourceManager.list() },
     { method: 'POST', path: '/sources', handler: async ({ body }) => app.sourceManager.create(body) },
     { method: 'GET', path: '/sources/:id', handler: async ({ params }) => app.sourceManager.getPublic(params.id) },
@@ -62,7 +64,6 @@ export const createHttpHandler = app => {
     { method: 'POST', path: '/music/search', handler: async ({ body }) => app.searchService.search(body) },
     { method: 'POST', path: '/music/match', handler: async ({ body }) => app.searchService.match(body) },
     { method: 'POST', path: '/music/url', handler: async ({ body }) => app.mediaService.resolveMusicUrl(body) },
-    { method: 'POST', path: '/music/urls', handler: async ({ body }) => app.mediaService.resolveMusicUrl({ ...body, allQualities: true }) },
     { method: 'POST', path: '/albums/detail', handler: async ({ body }) => app.mediaService.getAlbumDetail(body) },
     { method: 'POST', path: '/singers/detail', handler: async ({ body }) => app.mediaService.getSingerDetail(body) },
     { method: 'POST', path: '/music/detail', handler: async ({ body }) => app.mediaService.getMusicDetail(body) },

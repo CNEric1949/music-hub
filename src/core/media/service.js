@@ -5,6 +5,8 @@ import { ensureDir, safeJoin } from '../../shared/fs.js';
 import { sanitizeFileName } from '../../shared/text.js';
 import { httpFetch } from '../../utils/request.js';
 
+const qualityOrder = ['128k', '192k', '320k', 'flac', 'flac24bit', 'master'];
+
 export class MediaService {
   constructor(config, sourceManager, searchService = null) {
     this.config = config;
@@ -104,17 +106,17 @@ export class MediaService {
   }
 
   async getAlbumDetail(payload) {
-    const source = this.getSourceForCapability(payload.source || payload.songInfo?.source, 'album');
+    const source = this.getProviderForCapability(payload.source || payload.songInfo?.source, 'album');
     return source.getAlbumDetail(payload);
   }
 
   async getSingerDetail(payload) {
-    const source = this.getSourceForCapability(payload.source || payload.songInfo?.source, 'singer');
+    const source = this.getProviderForCapability(payload.source || payload.songInfo?.source, 'singer');
     return source.getSingerDetail(payload);
   }
 
   async getMusicDetail(payload) {
-    const source = this.getSourceForCapability(payload.source || payload.songInfo?.source, 'detail');
+    const source = this.getProviderForCapability(payload.source || payload.songInfo?.source, 'detail');
     return source.getMusicDetail(payload);
   }
 
@@ -136,44 +138,67 @@ export class MediaService {
     return sourceId ? { ...songInfo, source: sourceId } : songInfo;
   }
 
-  getUrlProvider(songSource) {
-    let source = this.sourceManager.sources.get(songSource);
-    if (!source?.enabled || !source.capabilities?.includes('url')) {
-      source = Array.from(this.sourceManager.sources.values()).find(candidate =>
+  getUrlProviders(songSource, providerId = null) {
+    if (providerId) {
+      const provider = this.getSourceForCapability(providerId, 'url');
+      if (provider.lxSources?.length && !provider.lxSources.includes(songSource)) {
+        throw new AppError(ERROR_CODES.SOURCE_CAPABILITY_UNSUPPORTED, `Source does not support platform: ${songSource}`, { source: providerId, platform: songSource }, 422);
+      }
+      return [provider];
+    }
+    const direct = this.sourceManager.sources.get(songSource);
+    const providers = [];
+    if (direct?.enabled && direct.capabilities?.includes('url')) providers.push(direct);
+    providers.push(...Array.from(this.sourceManager.sources.values()).filter(candidate =>
         candidate.type === 'custom' &&
         candidate.enabled &&
         candidate.initialized &&
         candidate.capabilities?.includes('url') &&
+        candidate.id !== direct?.id &&
         (!candidate.lxSources?.length || candidate.lxSources.includes(songSource))
-      );
-    }
-    if (!source) source = this.getSourceForCapability(songSource, 'url');
-    return source;
+      ));
+    if (!providers.length) providers.push(this.getSourceForCapability(songSource, 'url'));
+    return providers;
   }
 
-  async getMusicUrl(songInfo, quality, sourceId = null) {
+  async getMusicUrl(songInfo, quality, sourceId = null, providerId = null) {
     const targetSong = this.withSource(songInfo, sourceId);
-    const source = this.getUrlProvider(targetSong.source);
-    const result = await source.getMusicUrl(targetSong, quality);
-    if (typeof result === 'string') return { url: result, type: quality };
-    return result;
+    if (quality) this.getQualities(targetSong, quality);
+    const failures = [];
+    for (const provider of this.getUrlProviders(targetSong.source, providerId)) {
+      try {
+        const result = await provider.getMusicUrl(targetSong, quality);
+        const normalized = typeof result === 'string'
+          ? { url: result, type: quality, provider: provider.id }
+          : { ...result, provider: result.provider || provider.id };
+        if (normalized?.url) return normalized;
+        failures.push(this.failure(provider.id, targetSong.source, quality, ERROR_CODES.MUSIC_NOT_FOUND, 'Music URL not found'));
+      } catch (error) {
+        failures.push(this.failure(provider.id, targetSong.source, quality, error.code || ERROR_CODES.INTERNAL_ERROR, error.message));
+      }
+    }
+    throw new AppError(ERROR_CODES.MUSIC_NOT_FOUND, 'Music URL not found', { failures }, 404);
   }
 
-  async resolveMusicUrl({ songInfo, quality, type, source, platform, allQualities = null, allSources = null }) {
+  async resolveMusicUrl({ songInfo, quality, type, source, platform, provider, providerId, allQualities = null, allSources = null }) {
     if (!songInfo) throw new AppError(ERROR_CODES.VALIDATION_ERROR, 'songInfo is required', {}, 400);
     const targetQuality = quality || type;
     const sourceId = source || platform || null;
+    const targetProvider = provider || providerId || null;
     const shouldAllSources = allSources ?? !sourceId;
     const shouldAllQualities = allQualities ?? !targetQuality;
-    if (!shouldAllSources && !shouldAllQualities) return this.getMusicUrl(songInfo, targetQuality, sourceId);
+    if (!shouldAllSources && !shouldAllQualities) return this.getMusicUrl(songInfo, targetQuality, sourceId, targetProvider);
 
     const songs = shouldAllSources ? await this.getUrlCandidates(songInfo, sourceId) : [this.withSource(songInfo, sourceId)];
-    const results = {};
+    const results = [];
+    const failures = [];
     for (const item of songs) {
       const sourceKey = item.source || sourceId || songInfo.source;
-      results[sourceKey] = await this.getMusicUrlsForSong(item, shouldAllQualities ? null : targetQuality);
+      const resolved = await this.getMusicUrlsForSong(item, shouldAllQualities ? null : targetQuality, targetProvider);
+      results.push({ source: sourceKey, urls: resolved.urls });
+      failures.push(...resolved.failures);
     }
-    return shouldAllSources ? results : results[sourceId || songInfo.source];
+    return { results, failures };
   }
 
   async getUrlCandidates(songInfo, sourceId = null) {
@@ -197,20 +222,41 @@ export class MediaService {
     });
   }
 
-  async getMusicUrlsForSong(songInfo, quality = null) {
-    const qualities = quality ? [quality] : (songInfo.types?.map(item => item.type) || this.sourceManager.get(songInfo.source).supportedQualities || []);
+  async getMusicUrlsForSong(songInfo, quality = null, providerId = null) {
+    const qualities = this.getQualities(songInfo, quality);
     const urls = {};
+    const failures = [];
     for (const itemQuality of qualities) {
       try {
-        urls[itemQuality] = await this.getMusicUrl(songInfo, itemQuality);
+        urls[itemQuality] = await this.getMusicUrl(songInfo, itemQuality, null, providerId);
       } catch (error) {
-        urls[itemQuality] = { error: error.message };
+        failures.push(...(error.details?.failures || [this.failure(providerId || '', songInfo.source, itemQuality, error.code || ERROR_CODES.INTERNAL_ERROR, error.message)]));
       }
     }
-    return urls;
+    return { urls, failures };
   }
 
-  async getMusicUrls(songInfo) {
-    return this.getMusicUrlsForSong(songInfo);
+  getQualities(songInfo, quality = null) {
+    const songQualities = songInfo.types?.map(item => item.type).filter(Boolean) || [];
+    const available = songQualities.length
+      ? songQualities
+      : this.sourceManager.get(songInfo.source).supportedQualities
+      || [];
+    if (quality) {
+      if (available.length && !available.includes(quality)) {
+        throw new AppError(ERROR_CODES.QUALITY_UNSUPPORTED, `Quality unsupported: ${quality}`, { source: songInfo.source, quality, availableQualities: available }, 422);
+      }
+      return [quality];
+    }
+    return [...new Set(available)].sort((a, b) => this.qualityRank(a) - this.qualityRank(b));
+  }
+
+  qualityRank(quality) {
+    const index = qualityOrder.indexOf(quality);
+    return index === -1 ? qualityOrder.length : index;
+  }
+
+  failure(provider, source, quality, code, message) {
+    return { provider, source, quality, code, message };
   }
 }

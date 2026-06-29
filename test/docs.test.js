@@ -14,13 +14,27 @@ test('HTTP docs expose OpenAPI only at /api-docs', async () => {
     const openApi = await invokeHttp(httpHandler, 'GET', '/openapi.json');
     assert.equal(openApi.statusCode, 200);
     assert.equal(openApi.body.openapi, '3.1.0');
+    assert.ok(openApi.body.paths['/config']);
     assert.ok(openApi.body.paths['/music/url']);
+    assert.equal(openApi.body.paths['/music/urls'], undefined);
     assert.equal(openApi.body.components.schemas.SearchInput.properties.keyword.type, 'string');
     assert.ok(openApi.body.paths['/downloads'].post.requestBody);
 
     const apiDocs = await invokeHttp(httpHandler, 'GET', '/api-docs');
     assert.equal(apiDocs.statusCode, 200);
     assert.match(apiDocs.body, /SwaggerUIBundle/);
+
+    const config = await invokeHttp(httpHandler, 'GET', '/config');
+    assert.equal(config.statusCode, 200);
+    assert.equal(config.body.data.download.qualityStrategy, 'specified');
+
+    const updatedConfig = await invokeHttp(httpHandler, 'PATCH', '/config', {
+      download: { quality: '128k', qualityStrategy: 'lowest', sourceStrategy: 'all' }
+    });
+    assert.equal(updatedConfig.statusCode, 200);
+    assert.equal(updatedConfig.body.data.download.quality, '128k');
+    assert.equal(updatedConfig.body.data.download.qualityStrategy, 'lowest');
+    assert.equal(updatedConfig.body.data.download.sourceStrategy, 'all');
 
     const docs = await invokeHttp(httpHandler, 'GET', '/docs');
     assert.equal(docs.statusCode, 404);
@@ -37,7 +51,10 @@ test('MCP docs and tool schemas are exposed on MCP handler', async () => {
 
     const tools = await invokeHttp(mcpHandler, 'GET', '/mcp/tools');
     assert.equal(tools.statusCode, 200);
+    assert.ok(tools.body.tools.find(tool => tool.name === 'get_config').inputSchema);
+    assert.ok(tools.body.tools.find(tool => tool.name === 'update_config').inputSchema.properties.download);
     assert.ok(tools.body.tools.find(tool => tool.name === 'get_music_url').inputSchema.properties.songInfo);
+    assert.equal(tools.body.tools.some(tool => tool.name === 'get_music_urls'), false);
     assert.equal(tools.body.tools.some(tool => tool.name === 'upgrade_music_source'), false);
 
     const docs = await invokeHttp(mcpHandler, 'GET', '/mcp/docs');

@@ -25,6 +25,64 @@ export const schemas = {
       status: { type: 'string', examples: ['ok'] }
     }
   },
+  RuntimeConfig: {
+    type: 'object',
+    properties: {
+      server: { type: 'object', additionalProperties: true },
+      paths: { type: 'object', additionalProperties: true },
+      sources: {
+        type: 'object',
+        properties: {
+          multiSourceEnabled: { type: 'boolean' }
+        },
+        additionalProperties: true
+      },
+      download: {
+        type: 'object',
+        properties: {
+          quality: { type: 'string', enum: qualityEnum },
+          qualityStrategy: { type: 'string', enum: ['specified', 'highest', 'lowest'] },
+          sourceStrategy: { type: 'string', enum: ['specified', 'all'] }
+        },
+        additionalProperties: true
+      },
+      http: { type: 'object', additionalProperties: true },
+      logging: { type: 'object', additionalProperties: true }
+    }
+  },
+  RuntimeConfigUpdate: {
+    type: 'object',
+    properties: {
+      sources: {
+        type: 'object',
+        properties: {
+          multiSourceEnabled: { type: 'boolean' }
+        },
+        additionalProperties: true
+      },
+      download: {
+        type: 'object',
+        properties: {
+          quality: { type: 'string', enum: qualityEnum },
+          qualityStrategy: { type: 'string', enum: ['specified', 'highest', 'lowest'] },
+          sourceStrategy: { type: 'string', enum: ['specified', 'all'] },
+          maxConcurrency: { type: 'integer', minimum: 1 },
+          resumeOnStartup: { type: 'boolean' },
+          skipExistingFile: { type: 'boolean' },
+          embedCover: { type: 'boolean' },
+          saveCoverFile: { type: 'boolean' },
+          embedLyric: { type: 'boolean' },
+          saveLyricFile: { type: 'boolean' },
+          mergeLyric: { type: 'boolean' },
+          mergeTranslatedLyric: { type: 'boolean' },
+          mergeRomanLyric: { type: 'boolean' },
+          mergeLxLyric: { type: 'boolean' }
+        },
+        additionalProperties: true
+      }
+    },
+    additionalProperties: false
+  },
   MusicQuality: {
     type: 'object',
     properties: {
@@ -197,6 +255,8 @@ export const schemas = {
       songInfo: { $ref: '#/components/schemas/SongInfo' },
       source: { type: 'string', description: 'Platform id. Omit for all matched platforms.' },
       platform: { type: 'string', description: 'Alias of source.' },
+      provider: { type: 'string', description: 'Music source provider id. Omit to try all matching providers once.' },
+      providerId: { type: 'string', description: 'Alias of provider.' },
       quality: { type: 'string', enum: qualityEnum, description: 'Omit for all qualities.' },
       type: { type: 'string', enum: qualityEnum, description: 'Alias of quality.' },
       allSources: { type: 'boolean', description: 'Force all-platform URL resolving.' },
@@ -207,7 +267,7 @@ export const schemas = {
     type: 'object',
     properties: {
       url: { type: 'string', examples: ['https://example.com/music.mp3'] },
-      type: { type: 'string', enum: qualityEnum },
+      type: { type: ['string', 'null'], enum: [...qualityEnum, null], description: '`null` is allowed for local-source URL semantics.' },
       provider: { type: 'string', description: 'Source provider id, often the custom LX source id.' }
     },
     additionalProperties: true
@@ -215,19 +275,36 @@ export const schemas = {
   MusicUrlMap: {
     oneOf: [
       { $ref: '#/components/schemas/MusicUrlResult' },
-      {
-        type: 'object',
-        additionalProperties: {
-          oneOf: [
-            { $ref: '#/components/schemas/MusicUrlResult' },
-            {
-              type: 'object',
-              additionalProperties: { $ref: '#/components/schemas/MusicUrlResult' }
-            }
-          ]
-        }
-      }
+      { $ref: '#/components/schemas/MusicUrlResolveResponse' }
     ]
+  },
+  MusicUrlFailure: {
+    type: 'object',
+    properties: {
+      provider: { type: 'string' },
+      source: { type: 'string' },
+      quality: { type: 'string' },
+      code: { type: 'string' },
+      message: { type: 'string' }
+    }
+  },
+  MusicUrlGroup: {
+    type: 'object',
+    properties: {
+      source: { type: 'string' },
+      urls: {
+        type: 'object',
+        description: 'Quality-to-URL map ordered from low to high quality.',
+        additionalProperties: { $ref: '#/components/schemas/MusicUrlResult' }
+      }
+    }
+  },
+  MusicUrlResolveResponse: {
+    type: 'object',
+    properties: {
+      results: { type: 'array', items: { $ref: '#/components/schemas/MusicUrlGroup' } },
+      failures: { type: 'array', items: { $ref: '#/components/schemas/MusicUrlFailure' } }
+    }
   },
   LyricInfo: {
     type: 'object',
@@ -289,9 +366,6 @@ export const schemas = {
     properties: {
       songInfo: { $ref: '#/components/schemas/SongInfo' },
       musicInfo: { $ref: '#/components/schemas/SongInfo' },
-      quality: { type: 'string', enum: qualityEnum, default: '320k' },
-      qualityStrategy: { type: 'string', enum: ['specified', 'highest', 'lowest'], default: 'specified' },
-      sourceStrategy: { type: 'string', enum: ['specified', 'all'], default: 'specified' },
       autoStart: { type: 'boolean', default: true },
       url: { type: 'string', description: 'Optional resolved music URL.' },
       fileName: { type: 'string' },
@@ -413,6 +487,8 @@ const toMcpSchema = schema => ({
 });
 
 const rawMcpInputSchemas = {
+  get_config: schemas.EmptyInput,
+  update_config: schemas.RuntimeConfigUpdate,
   list_music_sources: schemas.EmptyInput,
   get_music_source: schemas.IdInput,
   create_music_source: schemas.SourceInput,
@@ -428,7 +504,6 @@ const rawMcpInputSchemas = {
   search_music: schemas.SearchInput,
   match_music: schemas.MatchInput,
   get_music_url: schemas.MusicUrlInput,
-  get_music_urls: schemas.MusicUrlInput,
   get_album_detail: {
     type: 'object',
     properties: {

@@ -293,7 +293,6 @@ export class SourceManager {
           record.updateCheckedAt = new Date().toISOString();
           const source = this.sources.get(record.id);
           if (source) source.update = this.publicUpdateInfo(record);
-          void this.saveRegistry();
         }
       });
       const updateInfo = this.normalizeUpdateInfo(api.__updateAlerts?.at?.(-1), api.__scriptInfo);
@@ -342,6 +341,41 @@ export class SourceManager {
     };
   }
 
+  normalizeSearchResult(result, fallback = {}) {
+    const payload = Array.isArray(result) ? { list: result } : (result || {});
+    const list = payload.list || payload.data || payload.musicList || payload.songs || [];
+    const limit = Number(payload.limit || fallback.limit || list.length || 0);
+    return {
+      list,
+      allPage: Number(payload.allPage || payload.pageCount || payload.totalPage || 0),
+      total: Number(payload.total || payload.count || list.length || 0),
+      limit,
+      source: payload.source || fallback.source
+    };
+  }
+
+  normalizeLyricResult(result) {
+    if (typeof result === 'string') return { lyric: result, tlyric: '', rlyric: '', lxlyric: '' };
+    return {
+      lyric: result?.lyric || result?.lrc || '',
+      tlyric: result?.tlyric || result?.tlrc || '',
+      rlyric: result?.rlyric || result?.rlrc || '',
+      lxlyric: result?.lxlyric || result?.lxlrc || result?.awlyric || '',
+      raw: result
+    };
+  }
+
+  normalizeCoverResult(result) {
+    if (typeof result === 'string') return result;
+    return result?.url || result?.pic || result?.img || result?.cover || result;
+  }
+
+  normalizeMusicUrlResult(result, quality, provider) {
+    if (typeof result === 'string') return { url: result, type: quality, provider };
+    if (result?.url) return { ...result, type: result.type ?? quality, provider };
+    return null;
+  }
+
   wrapCustomApi(record, api) {
     if (api.sources || api.__lxListeners?.has?.('request')) return this.wrapLxUserApi(record, api);
     const supportedQualities = api.supportedQualities || api.supportQuality || [];
@@ -367,7 +401,7 @@ export class SourceManager {
 
     return {
       id: record.id,
-      name: record.name || api.__scriptInfo?.name || api.name || record.id,
+      name: record.name || api.name || api.__scriptInfo?.name || record.id,
       type: 'custom',
       enabled: record.enabled,
       initialized: true,
@@ -425,6 +459,7 @@ export class SourceManager {
       if (result && typeof result === 'object' && 'promise' in result) return result.promise;
       return result;
     };
+    const manager = this;
 
     return {
       id: record.id,
@@ -441,36 +476,30 @@ export class SourceManager {
       platforms: Object.keys(lxSources),
       platformQualities,
       async getMusicUrl(songInfo, quality) {
+        const requestQuality = songInfo.source === 'local' ? null : quality;
         const result = await callRequest({
           action: 'musicUrl',
           source: songInfo.source,
           info: {
-            type: quality,
+            type: requestQuality,
             musicInfo: songInfo
           }
         });
-        if (typeof result === 'string') return { url: result, type: quality, provider: record.id };
-        if (result?.url) return { ...result, type: result.type || quality, provider: record.id };
+        const normalized = manager.normalizeMusicUrlResult(result, requestQuality, record.id);
+        if (normalized) return normalized;
         throw new AppError(ERROR_CODES.MUSIC_NOT_FOUND, 'Music URL not found from LX source', { id: record.id, source: songInfo.source }, 404);
       },
       async getLyric(songInfo) {
         const result = await callRequest({ action: 'lyric', source: songInfo.source, info: { musicInfo: songInfo } });
-        if (typeof result === 'string') return { lyric: result, tlyric: '', rlyric: '', lxlyric: '' };
-        return {
-          lyric: result?.lyric || result?.lrc || '',
-          tlyric: result?.tlyric || result?.tlrc || '',
-          rlyric: result?.rlyric || result?.rlrc || '',
-          lxlyric: result?.lxlyric || result?.lxlrc || result?.awlyric || '',
-          raw: result
-        };
+        return manager.normalizeLyricResult(result);
       },
       async getCover(songInfo) {
         const result = await callRequest({ action: 'pic', source: songInfo.source, info: { musicInfo: songInfo } });
-        if (typeof result === 'string') return result;
-        return result?.url || result?.pic || result;
+        return manager.normalizeCoverResult(result);
       },
       async search(options) {
-        return callRequest({ action: 'search', source: options.source, info: options });
+        const result = await callRequest({ action: 'search', source: options.source, info: options });
+        return manager.normalizeSearchResult(result, options);
       },
       async getAlbumDetail(payload) {
         return callRequest({ action: 'album', source: payload.source || payload.songInfo?.source, info: payload });

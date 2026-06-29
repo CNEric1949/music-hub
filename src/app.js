@@ -5,6 +5,7 @@ import { SearchService } from './core/search/service.js';
 import { MediaService } from './core/media/service.js';
 import { MetadataService } from './core/metadata/service.js';
 import { DownloadService } from './core/download/service.js';
+import { ConfigService } from './core/config/service.js';
 
 export const createApp = async (logger = console) => {
   const config = await loadConfig();
@@ -18,9 +19,11 @@ export const createApp = async (logger = console) => {
   const metadataService = new MetadataService();
   const downloadService = new DownloadService(config, mediaService, searchService, metadataService, logger);
   await downloadService.init();
+  const configService = new ConfigService(config);
 
   return {
     config,
+    configService,
     sourceManager,
     searchService,
     mediaService,

@@ -49,7 +49,10 @@ const envConfig = () => ({
   download: {
     maxConcurrency: numberEnv('MUSIC_HUB_DOWNLOAD_CONCURRENCY'),
     resumeOnStartup: boolEnv('MUSIC_HUB_DOWNLOAD_RESUME_ON_STARTUP'),
-    skipExistingFile: boolEnv('MUSIC_HUB_DOWNLOAD_SKIP_EXISTING')
+    skipExistingFile: boolEnv('MUSIC_HUB_DOWNLOAD_SKIP_EXISTING'),
+    quality: process.env.MUSIC_HUB_DOWNLOAD_QUALITY,
+    qualityStrategy: process.env.MUSIC_HUB_DOWNLOAD_QUALITY_STRATEGY,
+    sourceStrategy: process.env.MUSIC_HUB_DOWNLOAD_SOURCE_STRATEGY
   }
 });
 

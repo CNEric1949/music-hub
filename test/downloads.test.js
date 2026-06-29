@@ -20,17 +20,24 @@ test('download task management works over HTTP and MCP', { skip: !realSource.pat
   await withRealSourceEnv(async () => {
     const { httpHandler, mcpHandler } = await createTestHandlers();
     const firstSong = await searchFirstSong(httpHandler);
+    const updatedConfig = await invokeHttp(httpHandler, 'PATCH', '/config', {
+      download: { quality: '128k', qualityStrategy: 'lowest', sourceStrategy: 'all' }
+    });
+    assert.equal(updatedConfig.statusCode, 200);
+    assert.equal(updatedConfig.body.data.download.quality, '128k');
 
     const downloadTask = await invokeHttp(httpHandler, 'POST', '/downloads', {
       autoStart: false,
       songInfo: firstSong,
-      quality: firstSong.types?.[0]?.type || '128k',
       options: { embedCover: false, embedLyric: false, saveLyricFile: false }
     });
     assert.equal(downloadTask.statusCode, 200);
     assert.equal(downloadTask.body.ok, true);
     assert.equal(downloadTask.body.data.status, 'waiting');
     assert.equal(downloadTask.body.data.musicInfo.name, firstSong.name);
+    assert.equal(downloadTask.body.data.quality, '128k');
+    assert.equal(downloadTask.body.data.qualityStrategy, 'lowest');
+    assert.equal(downloadTask.body.data.sourceStrategy, 'all');
 
     const taskId = downloadTask.body.data.id;
     const taskDetail = await invokeHttp(httpHandler, 'GET', `/downloads/${taskId}`);
@@ -65,12 +72,12 @@ test('download task management works over HTTP and MCP', { skip: !realSource.pat
         arguments: {
           autoStart: false,
           songInfo: firstSong,
-          quality: firstSong.types?.[0]?.type || '128k',
           options: { embedCover: false, embedLyric: false, saveLyricFile: false }
         }
       }
     });
     assert.equal(mcpDownloadTask.result.structuredContent.status, 'waiting');
+    assert.equal(mcpDownloadTask.result.structuredContent.qualityStrategy, 'lowest');
   }, { files: [realSource.fileName], root: `${tempRoot}-download-tasks` });
 });
 

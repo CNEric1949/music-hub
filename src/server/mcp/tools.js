@@ -1,6 +1,16 @@
 import { mcpInputSchemas } from '../api-schemas.js';
 
 export const createTools = app => ({
+  get_config: {
+    description: 'Get runtime configuration.',
+    inputSchema: mcpInputSchemas.get_config,
+    handler: async () => app.configService.getPublic()
+  },
+  update_config: {
+    description: 'Update runtime configuration for this process.',
+    inputSchema: mcpInputSchemas.update_config,
+    handler: async input => app.configService.update(input)
+  },
   list_music_sources: {
     description: 'List music sources and capabilities.',
     inputSchema: mcpInputSchemas.list_music_sources,
@@ -50,11 +60,6 @@ export const createTools = app => ({
     description: 'Resolve one or many music URLs. Omit quality for all qualities; omit source for all matched platforms.',
     inputSchema: mcpInputSchemas.get_music_url,
     handler: async input => app.mediaService.resolveMusicUrl(input)
-  },
-  get_music_urls: {
-    description: 'Get all music URLs. Deprecated alias of get_music_url without quality.',
-    inputSchema: mcpInputSchemas.get_music_urls,
-    handler: async input => app.mediaService.resolveMusicUrl({ ...input, allQualities: true })
   },
   get_album_detail: {
     description: 'Get album detail.',

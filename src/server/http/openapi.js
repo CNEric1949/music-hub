@@ -38,6 +38,10 @@ export const openApiDocument = {
     '/health': {
       get: { tags: ['System'], ...op({ summary: 'Health check', response: { $ref: '#/components/schemas/HealthStatus' } }) }
     },
+    '/config': {
+      get: { tags: ['System'], ...op({ summary: 'Get runtime config', response: { $ref: '#/components/schemas/RuntimeConfig' } }) },
+      patch: { tags: ['System'], ...op({ summary: 'Update runtime config for this process', request: { $ref: '#/components/schemas/RuntimeConfigUpdate' }, response: { $ref: '#/components/schemas/RuntimeConfig' } }) }
+    },
     '/sources': {
       get: { tags: ['Sources'], ...op({ summary: 'List music sources', response: { type: 'array', items: { $ref: '#/components/schemas/Source' } } }) },
       post: { tags: ['Sources'], ...op({ summary: 'Create custom music source', request: { $ref: '#/components/schemas/SourceInput' }, response: { $ref: '#/components/schemas/Source' } }) }
@@ -70,21 +74,9 @@ export const openApiDocument = {
         tags: ['Music'],
         ...op({
           summary: 'Resolve one or many music URLs',
-          description: 'Specify source/platform and quality/type for one URL. Omit quality for all qualities. Omit source for all matched platforms.',
+          description: 'Specify source/platform and quality/type for one URL. Omit quality for all qualities sorted from low to high. Omit source for all matched platforms. provider/providerId selects one music source provider; omitting it tries all matching providers once. Business failures are returned in failures when multiple URLs are resolved.',
           request: { $ref: '#/components/schemas/MusicUrlInput' },
           response: { $ref: '#/components/schemas/MusicUrlMap' }
-        })
-      }
-    },
-    '/music/urls': {
-      post: {
-        tags: ['Music'],
-        ...op({
-          summary: 'Resolve all music URLs',
-          description: 'Compatibility alias of /music/url with allQualities=true.',
-          request: { $ref: '#/components/schemas/MusicUrlInput' },
-          response: { $ref: '#/components/schemas/MusicUrlMap' },
-          deprecated: true
         })
       }
     },

@@ -1,5 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
+import querystring from 'node:querystring';
 
 const parseBody = (buffer, headers, responseType) => {
   if (responseType === 'buffer') return buffer;
@@ -27,15 +28,22 @@ export const httpFetch = (url, options = {}) => {
   };
   for (const [key, value] of Object.entries(headers)) headers[key] = sanitizeHeaderValue(value);
 
-  let body = options.body;
-  if (body && typeof body === 'object' && !Buffer.isBuffer(body)) {
+  let body = options.body ?? options.data;
+  if (options.form) {
+    body = querystring.stringify(options.form);
+    headers['Content-Type'] = headers['Content-Type'] || headers['content-type'] || 'application/x-www-form-urlencoded';
+  } else if (options.formData) {
+    body = querystring.stringify(options.formData);
+    headers['Content-Type'] = headers['Content-Type'] || headers['content-type'] || 'application/x-www-form-urlencoded';
+  } else if (body && typeof body === 'object' && !Buffer.isBuffer(body)) {
     body = JSON.stringify(body);
     headers['Content-Type'] = headers['Content-Type'] || 'application/json';
   }
   if (body) headers['Content-Length'] = Buffer.byteLength(body);
 
-  return new Promise((resolve, reject) => {
-    const req = transport.request({
+  let req = null;
+  const promise = new Promise((resolve, reject) => {
+    req = transport.request({
       protocol: target.protocol,
       hostname: target.hostname,
       port: target.port,
@@ -64,4 +72,8 @@ export const httpFetch = (url, options = {}) => {
     if (body) req.write(body);
     req.end();
   });
+  promise.cancel = () => {
+    req?.destroy(new Error('Request canceled'));
+  };
+  return promise;
 };

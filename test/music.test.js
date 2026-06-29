@@ -63,6 +63,18 @@ test('real source search, match, media URL, lyric, cover, and detail capability 
     }
 
     const firstPlatform = platforms[0];
+    const pageOne = await invokeHttp(httpHandler, 'POST', '/music/search', { keyword, source: firstPlatform, page: 1, limit: 2 });
+    const pageTwo = await invokeHttp(httpHandler, 'POST', '/music/search', { keyword, source: firstPlatform, page: 2, limit: 2 });
+    assert.equal(pageOne.statusCode, 200);
+    assert.equal(pageTwo.statusCode, 200);
+    const pageOneGroup = pageOne.body.data.results.find(item => item.source === firstPlatform);
+    const pageTwoGroup = pageTwo.body.data.results.find(item => item.source === firstPlatform);
+    assert.equal(pageOneGroup.limit, 2);
+    assert.equal(pageTwoGroup.limit, 2);
+    assert.ok(pageOneGroup.list.length > 0);
+    assert.ok(pageTwoGroup.list.length > 0);
+    assert.notDeepEqual(pageTwoGroup.list.map(item => item.songmid || item.songId || item.name), pageOneGroup.list.map(item => item.songmid || item.songId || item.name));
+
     const firstSong = searchByPlatform.get(firstPlatform)[0];
     const matched = await invokeHttp(httpHandler, 'POST', '/music/match', {
       name: firstSong.name,
@@ -83,6 +95,7 @@ test('real source search, match, media URL, lyric, cover, and detail capability 
       params: { name: 'search_music', arguments: { keyword, source: firstPlatform, page: 1, limit: 2 } }
     });
     assert.ok(mcpSearch.result.structuredContent.results[0].list.length > 0);
+    assert.equal(mcpSearch.result.structuredContent.results[0].limit, 2);
 
     const urlResponse = await invokeHttp(httpHandler, 'POST', '/music/url', {
       songInfo: firstSong,
@@ -146,6 +159,11 @@ const getInitializedSource = async httpHandler => {
   return source;
 };
 
-const hasResolvedUrl = value => Object.values(value).some(group =>
-  Object.values(group).some(item => /^https?:\/\//.test(item?.url || ''))
-);
+const hasResolvedUrl = value => {
+  if (Array.isArray(value?.results)) {
+    return value.results.some(group => Object.values(group.urls || {}).some(item => /^https?:\/\//.test(item?.url || '')));
+  }
+  return Object.values(value).some(group =>
+    Object.values(group).some(item => /^https?:\/\//.test(item?.url || ''))
+  );
+};
