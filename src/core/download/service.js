@@ -349,7 +349,7 @@ export class DownloadService {
         lyricInfo,
         coverPath
       });
-      task.artifacts.metadata = embedded.sidecarPath;
+      task.artifacts.metadata = embedded;
     }
   }
 }

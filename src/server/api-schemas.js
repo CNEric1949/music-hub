@@ -447,7 +447,13 @@ export const schemas = {
     type: 'object',
     properties: {
       filePath: { type: 'string' },
-      sidecarPath: { type: 'string' }
+      embedded: { type: 'boolean' },
+      format: { type: 'string' },
+      fields: { type: 'array', items: { type: 'string' } },
+      blocks: { type: 'array', items: { type: 'integer' } },
+      coverPath: { type: ['string', 'null'] },
+      lyricEmbedded: { type: 'boolean' },
+      warnings: { type: 'array', items: { type: 'string' } }
     }
   },
   IdInput: {

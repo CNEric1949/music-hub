@@ -16,7 +16,7 @@ export const createApp = async (logger = console) => {
 
   const searchService = new SearchService(sourceManager);
   const mediaService = new MediaService(config, sourceManager, searchService);
-  const metadataService = new MetadataService();
+  const metadataService = new MetadataService(logger);
   const downloadService = new DownloadService(config, mediaService, searchService, metadataService, logger);
   await downloadService.init();
   const configService = new ConfigService(config);

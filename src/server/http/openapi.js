@@ -32,7 +32,7 @@ export const openApiDocument = {
     { name: 'Lyrics', description: 'Lyric retrieval and file saving.' },
     { name: 'Covers', description: 'Cover URL retrieval and cover downloading.' },
     { name: 'Downloads', description: 'Download task lifecycle and resume support.' },
-    { name: 'Metadata', description: 'Metadata sidecar writing.' }
+    { name: 'Metadata', description: 'Audio metadata embedding.' }
   ],
   paths: {
     '/health': {
@@ -122,7 +122,7 @@ export const openApiDocument = {
       post: { tags: ['Downloads'], ...op({ summary: 'Retry download task', parameters: [taskId], response: { $ref: '#/components/schemas/DownloadTask' } }) }
     },
     '/metadata/embed': {
-      post: { tags: ['Metadata'], ...op({ summary: 'Write metadata sidecar', request: { $ref: '#/components/schemas/MetadataEmbedInput' }, response: { $ref: '#/components/schemas/MetadataEmbedResult' } }) }
+      post: { tags: ['Metadata'], ...op({ summary: 'Embed audio metadata', request: { $ref: '#/components/schemas/MetadataEmbedInput' }, response: { $ref: '#/components/schemas/MetadataEmbedResult' } }) }
     }
   },
   components: {

@@ -109,7 +109,7 @@ test('local file download resumes and writes lyric and metadata artifacts', { sk
       fileName: 'local-download.mp3',
       songInfo: firstSong,
       quality: '128k',
-      options: { embedCover: false, embedLyric: true, saveLyricFile: true }
+      options: { embedCover: false, embedLyric: false, saveLyricFile: true }
     });
     assert.equal(localDownload.statusCode, 200);
     await fs.writeFile(localDownload.body.data.filePath, sourceBytes.subarray(0, 37));
@@ -118,7 +118,7 @@ test('local file download resumes and writes lyric and metadata artifacts', { sk
     assert.equal(resumedDownload.statusCode, 200);
     assert.equal(resumedDownload.body.data.status, 'completed');
     assert.deepEqual(await fs.readFile(localDownload.body.data.filePath), sourceBytes);
-    assert.ok(await fspExists(`${localDownload.body.data.filePath}.music-hub-meta.json`));
+    assert.equal(await fspExists(`${localDownload.body.data.filePath}.music-hub-meta.json`), false);
 
     const downloadFiles = await fs.readdir(path.join(root, 'downloads'));
     assert.ok(downloadFiles.some(file => file.endsWith('.lrc')));
@@ -241,6 +241,68 @@ test('HTTP download retries, resumes with Range, honors download dir, and suppor
   }
 });
 
+test('download task embeds downloaded lyric and cover into MP3 metadata', { timeout: 30000 }, async () => {
+  const audioBytes = Buffer.from([0xff, 0xfb, 0x90, 0x64, ...Buffer.from('music-hub embed audio')]);
+  const server = http.createServer((req, res) => {
+    if (req.url.startsWith('/song.mp3')) {
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audioBytes.length });
+      res.end(audioBytes);
+      return;
+    }
+    if (req.url.startsWith('/cover.png')) {
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': png1x1.length });
+      res.end(png1x1);
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    await withRealSourceEnv(async root => {
+      await fs.writeFile(path.join(root, 'sources', 'download-embed-source.js'), downloadEmbedSource(port));
+      const { httpHandler } = await createTestHandlers();
+      const songInfo = {
+        source: 'kw',
+        name: '紅蓮華',
+        singer: 'LiSA',
+        albumName: 'LEO-NiNE',
+        types: [{ type: '128k' }]
+      };
+
+      const created = await invokeHttp(httpHandler, 'POST', '/downloads', {
+        autoStart: false,
+        songInfo,
+        provider: 'download-embed-source',
+        quality: '128k',
+        fileName: 'embed-task.mp3',
+        options: { embedCover: true, saveCoverFile: true, embedLyric: true, saveLyricFile: true }
+      });
+      assert.equal(created.statusCode, 200);
+
+      const completed = await invokeHttp(httpHandler, 'POST', `/downloads/${created.body.data.id}/resume`);
+      assert.equal(completed.statusCode, 200);
+      assert.equal(completed.body.data.status, 'completed');
+      assert.equal(completed.body.data.artifacts.metadata.embedded, true);
+      assert.equal(completed.body.data.artifacts.metadata.format, 'mp3');
+      assert.equal(completed.body.data.artifacts.metadata.lyricEmbedded, true);
+      assert.ok(await fspExists(completed.body.data.artifacts.cover));
+      assert.equal(await fspExists(`${completed.body.data.filePath}.music-hub-meta.json`), false);
+
+      const bytes = await fs.readFile(completed.body.data.filePath);
+      assert.equal(bytes.subarray(0, 3).toString('ascii'), 'ID3');
+      assert.ok(bytes.includes(Buffer.from('TIT2')));
+      assert.ok(bytes.includes(Buffer.from('TPE1')));
+      assert.ok(bytes.includes(Buffer.from('TALB')));
+      assert.ok(bytes.includes(Buffer.from('USLT')));
+      assert.ok(bytes.includes(Buffer.from('APIC')));
+    }, { files: [], root: `${tempRoot}-download-embed` });
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('builtin cover download fetches a real cover for 紅蓮華', { timeout: 90000 }, async () => {
   await withRealSourceEnv(async root => {
     const { httpHandler } = await createTestHandlers();
@@ -292,3 +354,28 @@ module.exports = {
   }
 };
 `;
+
+const downloadEmbedSource = port => `
+module.exports = {
+  name: 'Download Embed Source',
+  supportedQualities: ['128k'],
+  capabilities: ['url', 'lyric', 'cover'],
+  platforms: ['kw'],
+  lxSources: ['kw'],
+  getMusicUrl(songInfo, quality) {
+    return { url: 'http://127.0.0.1:${port}/song.mp3', type: quality || '128k', provider: 'download-embed-source' };
+  },
+  getLyric() {
+    return { lyric: '[00:00.000]紅蓮華', tlyric: '[00:00.000]红莲华', rlyric: '[00:00.000]gurenge', lxlyric: '' };
+  },
+  getCover() {
+    return { url: 'http://127.0.0.1:${port}/cover.png', sourceType: 'song', provider: 'download-embed-source' };
+  }
+};
+`;
+
+const png1x1 = Buffer.from(
+  '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6300010000050001' +
+  '0d0a2db40000000049454e44ae426082',
+  'hex'
+);
