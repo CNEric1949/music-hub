@@ -70,11 +70,13 @@ export class MediaService {
 
   async getCover(songInfo) {
     const source = this.getProviderForCapability(songInfo.source, 'cover');
-    return { url: await source.getCover(songInfo) };
+    const result = await source.getCover(songInfo);
+    return typeof result === 'string' ? { url: result } : result;
   }
 
   async downloadCover({ songInfo, url, fileName }) {
-    const coverUrl = url || (await this.getCover(songInfo)).url;
+    const cover = url ? { url } : await this.getCover(songInfo);
+    const coverUrl = cover.url;
     if (!coverUrl) throw new AppError(ERROR_CODES.MUSIC_NOT_FOUND, 'Cover URL not found', { songInfo }, 404);
     const response = await httpFetch(coverUrl, { responseType: 'buffer' });
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -85,7 +87,7 @@ export class MediaService {
     const filePath = safeJoin(this.config.paths.downloadDir, name);
     await ensureDir(path.dirname(filePath));
     await fs.writeFile(filePath, response.body);
-    return { filePath, url: coverUrl };
+    return { ...cover, filePath, url: coverUrl };
   }
 
   coverExtFromContentType(contentType = '') {

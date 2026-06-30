@@ -344,7 +344,12 @@ export const schemas = {
     type: 'object',
     properties: {
       url: { type: 'string' },
-      filePath: { type: 'string' }
+      filePath: { type: 'string' },
+      source: { type: 'string' },
+      sourceType: { type: 'string', enum: ['song', 'album', 'resource', 'custom'] },
+      provider: { type: 'string' },
+      fallback: { type: 'boolean' },
+      raw: { type: 'object', additionalProperties: true }
     }
   },
   DownloadOptions: {

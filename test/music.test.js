@@ -140,6 +140,9 @@ test('real source search, match, media URL, lyric, cover, and detail capability 
     const coverResponse = await invokeHttp(httpHandler, 'POST', '/covers/get', { songInfo: firstSong });
     assert.equal(coverResponse.statusCode, 200);
     assert.ok('url' in coverResponse.body.data);
+    if (coverResponse.body.data.sourceType) {
+      assert.ok(['song', 'album', 'resource', 'custom'].includes(coverResponse.body.data.sourceType));
+    }
 
     const unsupportedAlbum = await invokeHttp(httpHandler, 'POST', '/albums/detail', { source: 'wy', albumId: 'dummy' });
     assert.equal(unsupportedAlbum.statusCode, 422);

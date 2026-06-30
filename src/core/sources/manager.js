@@ -367,7 +367,14 @@ export class SourceManager {
 
   normalizeCoverResult(result) {
     if (typeof result === 'string') return result;
-    return result?.url || result?.pic || result?.img || result?.cover || result;
+    const url = result?.url || result?.pic || result?.img || result?.cover;
+    if (!url) return result;
+    return {
+      url,
+      sourceType: result.sourceType || result.type || 'custom',
+      provider: result.provider || result.source || 'custom',
+      raw: result
+    };
   }
 
   normalizeMusicUrlResult(result, quality, provider) {

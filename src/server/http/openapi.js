@@ -96,7 +96,7 @@ export const openApiDocument = {
       post: { tags: ['Lyrics'], ...op({ summary: 'Save lyric files', request: { $ref: '#/components/schemas/LyricSaveInput' }, response: { $ref: '#/components/schemas/FileResult' } }) }
     },
     '/covers/get': {
-      post: { tags: ['Covers'], ...op({ summary: 'Get cover URL', request: { type: 'object', required: ['songInfo'], properties: { songInfo: { $ref: '#/components/schemas/SongInfo' } } }, response: { type: 'object', properties: { url: { type: 'string' } } } }) }
+      post: { tags: ['Covers'], ...op({ summary: 'Get cover URL', request: { type: 'object', required: ['songInfo'], properties: { songInfo: { $ref: '#/components/schemas/SongInfo' } } }, response: { $ref: '#/components/schemas/CoverResult' } }) }
     },
     '/covers/download': {
       post: { tags: ['Covers'], ...op({ summary: 'Download cover', request: { $ref: '#/components/schemas/CoverInput' }, response: { $ref: '#/components/schemas/CoverResult' } }) }

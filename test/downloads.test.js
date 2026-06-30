@@ -112,6 +112,30 @@ test('local file download resumes and writes lyric and metadata artifacts', { sk
   }, { files: [realSource.fileName], root: `${tempRoot}-download-resume` });
 });
 
+test('builtin cover download fetches a real cover for 紅蓮華', { timeout: 90000 }, async () => {
+  await withRealSourceEnv(async root => {
+    const { httpHandler } = await createTestHandlers();
+    const search = await invokeHttp(httpHandler, 'POST', '/music/search', { keyword, source: 'tx', page: 1, limit: 5 });
+    assert.equal(search.statusCode, 200);
+    const song = search.body.data.results[0].list.find(item => item.name === keyword && /LiSA/i.test(item.singer))
+      || search.body.data.results[0].list[0];
+
+    const cover = await invokeHttp(httpHandler, 'POST', '/covers/get', { songInfo: song });
+    assert.equal(cover.statusCode, 200);
+    assert.match(cover.body.data.url, /^https?:\/\//);
+    assert.ok(['song', 'album', 'resource'].includes(cover.body.data.sourceType));
+
+    const download = await invokeHttp(httpHandler, 'POST', '/covers/download', { songInfo: song, fileName: 'gurenge-cover.jpg' });
+    assert.equal(download.statusCode, 200);
+    assert.match(download.body.data.url, /^https?:\/\//);
+    assert.ok(['song', 'album', 'resource'].includes(download.body.data.sourceType));
+    assert.ok(await fspExists(download.body.data.filePath));
+    const stat = await fs.stat(download.body.data.filePath);
+    assert.ok(stat.size > 1024, 'downloaded cover should contain image bytes');
+    assert.equal(path.dirname(download.body.data.filePath), path.join(root, 'downloads'));
+  }, { files: [], root: `${tempRoot}-cover-download` });
+});
+
 const searchFirstSong = async httpHandler => {
   const sources = await invokeHttp(httpHandler, 'GET', '/sources');
   const source = sources.body.data.find(item => item.id === realSource.id);

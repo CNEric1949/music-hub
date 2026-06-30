@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { AppError, ERROR_CODES } from '../../shared/errors.js';
 import { normalizeKeyword } from '../../shared/text.js';
 import { httpFetch } from '../../utils/request.js';
+import { getBuiltinCover } from './covers/index.js';
 import { getBuiltinLyric } from './lyrics/index.js';
 
 const defaultQualities = ['128k', '320k', 'flac', 'flac24bit'];
@@ -374,7 +375,7 @@ const createBuiltinSource = definition => ({
   },
   async getCover(songInfo) {
     if (!definition.capabilities.includes('cover')) unsupported('cover');
-    return songInfo?.img || '';
+    return getBuiltinCover(definition.id, songInfo);
   },
   async getAlbumDetail(payload) {
     if (!definition.capabilities.includes('album')) unsupported('album');
