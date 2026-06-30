@@ -28,7 +28,7 @@ export const getRealSource = predicate => {
   };
 };
 
-export const withRealSourceEnv = async (fn, { files = realSourceFiles, root = tempRoot, multiSourceEnabled = true } = {}) => {
+export const withRealSourceEnv = async (fn, { files = realSourceFiles, root = tempRoot, multiSourceEnabled = true, env = {} } = {}) => {
   const old = { ...process.env };
   process.env.MUSIC_HUB_DATA_DIR = path.join(root, 'data');
   process.env.MUSIC_HUB_SOURCES_DIR = path.join(root, 'sources');
@@ -36,6 +36,7 @@ export const withRealSourceEnv = async (fn, { files = realSourceFiles, root = te
   process.env.MUSIC_HUB_CACHE_DIR = path.join(root, 'cache');
   process.env.MUSIC_HUB_LOGS_DIR = path.join(root, 'logs');
   process.env.MUSIC_HUB_SOURCES_MULTI_ENABLED = multiSourceEnabled ? 'true' : 'false';
+  Object.assign(process.env, env);
   try {
     await fs.rm(root, { recursive: true, force: true });
     await fs.mkdir(path.join(root, 'sources'), { recursive: true });

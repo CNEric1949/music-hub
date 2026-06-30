@@ -51,6 +51,8 @@ export class ConfigService {
       'maxConcurrency',
       'resumeOnStartup',
       'skipExistingFile',
+      'retryCount',
+      'retryIntervalMs',
       'embedCover',
       'saveCoverFile',
       'embedLyric',

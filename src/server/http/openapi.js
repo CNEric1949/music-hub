@@ -106,7 +106,8 @@ export const openApiDocument = {
       post: { tags: ['Downloads'], ...op({ summary: 'Create download task', request: { $ref: '#/components/schemas/DownloadInput' }, response: { $ref: '#/components/schemas/DownloadTask' } }) }
     },
     '/downloads/{id}': {
-      get: { tags: ['Downloads'], ...op({ summary: 'Get download task', parameters: [taskId], response: { $ref: '#/components/schemas/DownloadTask' } }) }
+      get: { tags: ['Downloads'], ...op({ summary: 'Get download task', parameters: [taskId], response: { $ref: '#/components/schemas/DownloadTask' } }) },
+      delete: { tags: ['Downloads'], ...op({ summary: 'Delete download task', parameters: [taskId], response: { $ref: '#/components/schemas/DownloadTask' } }) }
     },
     '/downloads/{id}/pause': {
       post: { tags: ['Downloads'], ...op({ summary: 'Pause download task', parameters: [taskId], response: { $ref: '#/components/schemas/DownloadTask' } }) }

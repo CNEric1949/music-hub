@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -63,6 +64,18 @@ test('download task management works over HTTP and MCP', { skip: !realSource.pat
     assert.equal(cancelTask.statusCode, 200);
     assert.equal(cancelTask.body.data.status, 'canceled');
 
+    const deletableTask = await invokeHttp(httpHandler, 'POST', '/downloads', {
+      autoStart: false,
+      songInfo: firstSong,
+      options: { embedCover: false, embedLyric: false, saveLyricFile: false }
+    });
+    const deleteTask = await invokeHttp(httpHandler, 'DELETE', `/downloads/${deletableTask.body.data.id}`);
+    assert.equal(deleteTask.statusCode, 200);
+    assert.equal(deleteTask.body.data.status, 'canceled');
+    assert.equal(deleteTask.body.data.deleted, true);
+    const afterDelete = await invokeHttp(httpHandler, 'GET', `/downloads/${deletableTask.body.data.id}`);
+    assert.equal(afterDelete.statusCode, 404);
+
     const mcpDownloadTask = await invokeMcp(mcpHandler, {
       jsonrpc: '2.0',
       id: 5,
@@ -112,6 +125,122 @@ test('local file download resumes and writes lyric and metadata artifacts', { sk
   }, { files: [realSource.fileName], root: `${tempRoot}-download-resume` });
 });
 
+test('HTTP download retries, resumes with Range, honors download dir, and supports source platform quality combinations', { timeout: 30000 }, async () => {
+  const sourceBytes = Buffer.from('music-hub http download fixture\n'.repeat(256));
+  const requests = [];
+  let failuresBeforeSuccess = 2;
+  const server = http.createServer((req, res) => {
+    requests.push({ url: req.url, range: req.headers.range || '' });
+    if (req.url.startsWith('/unstable') && failuresBeforeSuccess > 0) {
+      failuresBeforeSuccess -= 1;
+      res.writeHead(503, { 'Content-Type': 'text/plain' });
+      res.end('retry later');
+      return;
+    }
+    const range = req.headers.range || '';
+    const start = Number(range.match(/bytes=(\d+)-/)?.[1] || 0);
+    const body = sourceBytes.subarray(start);
+    res.writeHead(start ? 206 : 200, {
+      'Content-Type': 'audio/mpeg',
+      'Content-Length': body.length,
+      ...(start ? { 'Content-Range': `bytes ${start}-${sourceBytes.length - 1}/${sourceBytes.length}` } : {}),
+      'Accept-Ranges': 'bytes'
+    });
+    res.end(body);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    await withRealSourceEnv(async root => {
+      await fs.writeFile(path.join(root, 'sources', 'download-combo-source.js'), downloadComboSource(port));
+      const { httpHandler } = await createTestHandlers();
+
+      const config = await invokeHttp(httpHandler, 'GET', '/config');
+      assert.equal(config.body.data.download.retryCount, 3);
+      assert.equal(config.body.data.download.retryIntervalMs, 5);
+
+      const songInfo = {
+        source: 'kw',
+        name: '紅蓮華',
+        singer: 'LiSA',
+        interval: '03:56',
+        types: [{ type: '128k' }, { type: '320k' }]
+      };
+
+      const created = await invokeHttp(httpHandler, 'POST', '/downloads', {
+        autoStart: false,
+        songInfo,
+        platform: 'tx',
+        provider: 'download-combo-source',
+        quality: '128k',
+        retryCount: 3,
+        retryIntervalMs: 5,
+        fileName: 'combo-download.mp3',
+        options: { embedCover: false, saveCoverFile: false, embedLyric: false, saveLyricFile: false }
+      });
+      assert.equal(created.statusCode, 200);
+      assert.equal(created.body.data.platform, 'tx');
+      assert.equal(created.body.data.provider, 'download-combo-source');
+      assert.equal(created.body.data.quality, '128k');
+      assert.equal(created.body.data.maxRetries, 3);
+      assert.equal(created.body.data.retryIntervalMs, 5);
+      assert.equal(path.dirname(created.body.data.filePath), path.join(root, 'downloads'));
+
+      await fs.writeFile(created.body.data.filePath, sourceBytes.subarray(0, 101));
+      const resumed = await invokeHttp(httpHandler, 'POST', `/downloads/${created.body.data.id}/resume`);
+      assert.equal(resumed.statusCode, 200);
+      assert.equal(resumed.body.data.status, 'completed');
+      assert.equal(resumed.body.data.musicInfo.source, 'tx');
+      assert.equal(resumed.body.data.quality, '128k');
+      assert.equal(resumed.body.data.attempts, 3);
+      assert.match(resumed.body.data.url, /platform=tx&quality=128k/);
+      assert.deepEqual(await fs.readFile(resumed.body.data.filePath), sourceBytes);
+      assert.ok(requests.some(item => item.url.startsWith('/unstable') && item.range === 'bytes=101-'));
+
+      const sourceOnly = await invokeHttp(httpHandler, 'POST', '/downloads', {
+        autoStart: false,
+        songInfo,
+        source: 'kg',
+        provider: 'download-combo-source',
+        qualityStrategy: 'highest',
+        fileName: 'source-only.flac',
+        options: { embedCover: false, saveCoverFile: false, embedLyric: false, saveLyricFile: false }
+      });
+      assert.equal(sourceOnly.body.data.platform, 'kg');
+      const sourceOnlyDone = await invokeHttp(httpHandler, 'POST', `/downloads/${sourceOnly.body.data.id}/resume`);
+      assert.equal(sourceOnlyDone.body.data.status, 'completed');
+      assert.equal(sourceOnlyDone.body.data.musicInfo.source, 'kg');
+      assert.equal(sourceOnlyDone.body.data.quality, '320k');
+      assert.match(sourceOnlyDone.body.data.url, /platform=kg&quality=320k/);
+
+      const defaultTask = await invokeHttp(httpHandler, 'POST', '/downloads', {
+        autoStart: false,
+        songInfo,
+        provider: 'download-combo-source',
+        fileName: 'default-combo.mp3',
+        options: { embedCover: false, saveCoverFile: false, embedLyric: false, saveLyricFile: false }
+      });
+      const defaultDone = await invokeHttp(httpHandler, 'POST', `/downloads/${defaultTask.body.data.id}/resume`);
+      assert.equal(defaultDone.body.data.status, 'completed');
+      assert.equal(defaultDone.body.data.musicInfo.source, 'kw');
+      assert.equal(defaultDone.body.data.quality, '320k');
+      assert.match(defaultDone.body.data.url, /platform=kw&quality=320k/);
+    }, {
+      files: [],
+      root: `${tempRoot}-http-download`,
+      env: {
+        MUSIC_HUB_DOWNLOAD_QUALITY: '320k',
+        MUSIC_HUB_DOWNLOAD_QUALITY_STRATEGY: 'specified',
+        MUSIC_HUB_DOWNLOAD_SOURCE_STRATEGY: 'specified',
+        MUSIC_HUB_DOWNLOAD_RETRY_COUNT: '3',
+        MUSIC_HUB_DOWNLOAD_RETRY_INTERVAL_MS: '5'
+      }
+    });
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('builtin cover download fetches a real cover for 紅蓮華', { timeout: 90000 }, async () => {
   await withRealSourceEnv(async root => {
     const { httpHandler } = await createTestHandlers();
@@ -144,3 +273,22 @@ const searchFirstSong = async httpHandler => {
   assert.equal(search.statusCode, 200);
   return search.body.data.results.find(item => item.source === platform).list[0];
 };
+
+const downloadComboSource = port => `
+module.exports = {
+  name: 'Download Combo Source',
+  supportedQualities: ['128k', '320k', 'flac'],
+  capabilities: ['url'],
+  platforms: ['kw', 'kg', 'tx'],
+  lxSources: ['kw', 'kg', 'tx'],
+  getMusicUrl(songInfo, quality) {
+    const platform = songInfo.source;
+    const type = quality || '320k';
+    return {
+      url: 'http://127.0.0.1:${port}/unstable?platform=' + platform + '&quality=' + type,
+      type,
+      provider: 'download-combo-source'
+    };
+  }
+};
+`;

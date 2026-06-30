@@ -10,6 +10,11 @@ import { extForQuality, sanitizeFileName } from '../../shared/text.js';
 
 const TASKS_FILE = 'download-tasks.json';
 const terminalStatuses = new Set(['completed', 'canceled']);
+const sleep = ms => new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+const numberOrDefault = (value, fallback) => {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+};
 
 export class DownloadService {
   constructor(config, mediaService, searchService, metadataService, logger = console) {
@@ -52,19 +57,29 @@ export class DownloadService {
   }
 
   async create(options) {
+    const downloadOptions = { ...this.config.download, ...(options.options || {}) };
+    const quality = options.quality || options.type || downloadOptions.quality || '320k';
+    const explicitProvider = options.provider || options.providerId || options.sourceId || null;
+    const platform = options.platform || (explicitProvider && options.source ? options.source : null) || (!explicitProvider ? options.source : null) || null;
+    const provider = explicitProvider || (options.platform ? options.source : null) || null;
     const task = {
       id: randomUUID(),
       status: 'waiting',
       musicInfo: options.songInfo || options.musicInfo,
-      quality: this.config.download.quality || '320k',
-      qualityStrategy: this.config.download.qualityStrategy || 'specified',
-      sourceStrategy: this.config.download.sourceStrategy || 'specified',
+      quality,
+      qualityStrategy: options.qualityStrategy || downloadOptions.qualityStrategy || 'specified',
+      sourceStrategy: options.sourceStrategy || downloadOptions.sourceStrategy || 'specified',
+      platform,
+      provider,
       url: options.url || null,
       filePath: '',
       customFileName: Boolean(options.fileName),
       artifacts: {},
       progress: { total: 0, downloaded: 0, percent: 0, speed: 0 },
-      options: { ...this.config.download, ...(options.options || {}) },
+      attempts: 0,
+      maxRetries: numberOrDefault(options.retryCount ?? downloadOptions.retryCount, 3),
+      retryIntervalMs: numberOrDefault(options.retryIntervalMs ?? downloadOptions.retryIntervalMs, 5000),
+      options: downloadOptions,
       error: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -100,11 +115,20 @@ export class DownloadService {
     return task;
   }
 
+  async delete(id) {
+    const task = await this.pause(id);
+    task.status = 'canceled';
+    this.tasks.delete(id);
+    await this.persist();
+    return { ...task, deleted: true };
+  }
+
   async retry(id) {
     const task = this.get(id);
     task.status = 'waiting';
     task.error = null;
     task.url = null;
+    task.attempts = 0;
     await this.persist();
     return this.resume(id);
   }
@@ -119,8 +143,7 @@ export class DownloadService {
     await this.persist();
 
     try {
-      if (!task.url) task.url = await this.resolveUrl(task);
-      await this.download(task);
+      await this.runWithRetries(task);
       task.status = 'completed';
       task.progress.percent = 100;
       task.updatedAt = new Date().toISOString();
@@ -137,6 +160,32 @@ export class DownloadService {
     return task;
   }
 
+  async runWithRetries(task) {
+    const maxRetries = numberOrDefault(task.maxRetries ?? task.options?.retryCount, 3);
+    const retryIntervalMs = numberOrDefault(task.retryIntervalMs ?? task.options?.retryIntervalMs, 5000);
+    let lastError = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      task.attempts = attempt + 1;
+      task.updatedAt = new Date().toISOString();
+      await this.persist();
+      try {
+        if (!task.url) task.url = await this.resolveUrl(task);
+        await this.download(task);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (task.status === 'paused' || task.status === 'canceled') throw error;
+        if (attempt >= maxRetries) break;
+        task.status = 'retrying';
+        task.error = { message: error.message, code: error.code || ERROR_CODES.INTERNAL_ERROR, attempt: attempt + 1 };
+        await this.persist();
+        await sleep(retryIntervalMs);
+        if (task.status === 'paused' || task.status === 'canceled') throw error;
+      }
+    }
+    throw lastError;
+  }
+
   chooseQuality(task, musicInfo) {
     const qualities = musicInfo.types?.map(item => item.type) || [task.quality];
     const order = ['flac24bit', 'flac', '320k', '192k', '128k'];
@@ -146,23 +195,25 @@ export class DownloadService {
   }
 
   async resolveUrl(task) {
-    const candidates = [task.musicInfo];
+    const baseMusicInfo = task.platform ? { ...task.musicInfo, source: task.platform } : task.musicInfo;
+    const candidates = [baseMusicInfo];
     if (task.sourceStrategy === 'all') {
       const matched = await this.searchService.match({
-        name: task.musicInfo.name,
-        singer: task.musicInfo.singer,
-        albumName: task.musicInfo.albumName,
-        interval: task.musicInfo.interval,
-        source: task.musicInfo.source
+        name: baseMusicInfo.name,
+        singer: baseMusicInfo.singer,
+        albumName: baseMusicInfo.albumName,
+        interval: baseMusicInfo.interval,
+        source: baseMusicInfo.source
       });
       candidates.push(...matched.list);
     }
     for (const item of candidates) {
       try {
         const quality = this.chooseQuality(task, item);
-        const result = await this.mediaService.getMusicUrl(item, quality);
+        const result = await this.mediaService.getMusicUrl(item, quality, null, task.provider);
         task.musicInfo = item;
         task.quality = result.type || quality;
+        task.provider = result.provider || task.provider || null;
         if (!task.customFileName) task.filePath = this.defaultFilePath(task);
         return result.url;
       } catch (error) {
@@ -186,6 +237,11 @@ export class DownloadService {
     if (await pathExists(task.filePath)) {
       const stat = await fsp.stat(task.filePath);
       downloaded = stat.size;
+      if (task.options?.skipExistingFile && downloaded > 0 && task.progress.total && downloaded >= task.progress.total) {
+        task.progress.downloaded = downloaded;
+        task.progress.percent = 100;
+        return;
+      }
     }
 
     const target = new URL(task.url);
@@ -203,8 +259,10 @@ export class DownloadService {
           res.resume();
           return;
         }
-        const total = Number(res.headers['content-length'] || 0) + downloaded;
-        const stream = fs.createWriteStream(task.filePath, { flags: downloaded > 0 && res.statusCode === 206 ? 'a' : 'w' });
+        const resumed = downloaded > 0 && res.statusCode === 206;
+        if (downloaded > 0 && res.statusCode === 200) downloaded = 0;
+        const total = Number(res.headers['content-length'] || 0) + (resumed ? downloaded : 0);
+        const stream = fs.createWriteStream(task.filePath, { flags: resumed ? 'a' : 'w' });
         let last = Date.now();
         let lastBytes = downloaded;
         task.progress.total = total;
@@ -225,7 +283,10 @@ export class DownloadService {
         res.pipe(stream);
         stream.on('finish', resolve);
         stream.on('error', reject);
-        res.on('error', reject);
+        res.on('error', error => {
+          stream.destroy();
+          reject(error);
+        });
       });
       this.running.set(task.id, req);
       req.on('error', reject);

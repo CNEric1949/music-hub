@@ -42,7 +42,9 @@ export const schemas = {
         properties: {
           quality: { type: 'string', enum: qualityEnum },
           qualityStrategy: { type: 'string', enum: ['specified', 'highest', 'lowest'] },
-          sourceStrategy: { type: 'string', enum: ['specified', 'all'] }
+          sourceStrategy: { type: 'string', enum: ['specified', 'all'] },
+          retryCount: { type: 'integer', minimum: 0 },
+          retryIntervalMs: { type: 'integer', minimum: 0 }
         },
         additionalProperties: true
       },
@@ -67,6 +69,8 @@ export const schemas = {
           qualityStrategy: { type: 'string', enum: ['specified', 'highest', 'lowest'] },
           sourceStrategy: { type: 'string', enum: ['specified', 'all'] },
           maxConcurrency: { type: 'integer', minimum: 1 },
+          retryCount: { type: 'integer', minimum: 0 },
+          retryIntervalMs: { type: 'integer', minimum: 0 },
           resumeOnStartup: { type: 'boolean' },
           skipExistingFile: { type: 'boolean' },
           embedCover: { type: 'boolean' },
@@ -373,6 +377,17 @@ export const schemas = {
       musicInfo: { $ref: '#/components/schemas/SongInfo' },
       autoStart: { type: 'boolean', default: true },
       url: { type: 'string', description: 'Optional resolved music URL.' },
+      quality: { type: 'string', enum: qualityEnum },
+      type: { type: 'string', enum: qualityEnum },
+      qualityStrategy: { type: 'string', enum: ['specified', 'highest', 'lowest'] },
+      sourceStrategy: { type: 'string', enum: ['specified', 'all'] },
+      source: { type: 'string', description: 'When platform is set, source is the URL provider id; otherwise it is the target platform id.' },
+      platform: { type: 'string', description: 'Target music platform id.' },
+      provider: { type: 'string', description: 'URL provider/source id.' },
+      providerId: { type: 'string' },
+      sourceId: { type: 'string' },
+      retryCount: { type: 'integer', minimum: 0 },
+      retryIntervalMs: { type: 'integer', minimum: 0 },
       fileName: { type: 'string' },
       options: { $ref: '#/components/schemas/DownloadOptions' }
     }
@@ -381,11 +396,13 @@ export const schemas = {
     type: 'object',
     properties: {
       id: { type: 'string' },
-      status: { type: 'string', enum: ['waiting', 'running', 'paused', 'completed', 'failed', 'canceled'] },
+      status: { type: 'string', enum: ['waiting', 'running', 'retrying', 'paused', 'completed', 'failed', 'canceled'] },
       musicInfo: { $ref: '#/components/schemas/SongInfo' },
       quality: { type: 'string' },
       qualityStrategy: { type: 'string' },
       sourceStrategy: { type: 'string' },
+      platform: { type: ['string', 'null'] },
+      provider: { type: ['string', 'null'] },
       url: { type: ['string', 'null'] },
       filePath: { type: 'string' },
       artifacts: { type: 'object', additionalProperties: true },
@@ -398,6 +415,10 @@ export const schemas = {
           speed: { type: 'number' }
         }
       },
+      attempts: { type: 'integer' },
+      maxRetries: { type: 'integer' },
+      retryIntervalMs: { type: 'integer' },
+      deleted: { type: 'boolean' },
       options: { $ref: '#/components/schemas/DownloadOptions' },
       error: { type: ['object', 'null'], additionalProperties: true },
       createdAt: { type: 'string', format: 'date-time' },

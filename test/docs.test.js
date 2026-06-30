@@ -19,6 +19,7 @@ test('HTTP docs expose OpenAPI only at /api-docs', async () => {
     assert.equal(openApi.body.paths['/music/urls'], undefined);
     assert.equal(openApi.body.components.schemas.SearchInput.properties.keyword.type, 'string');
     assert.ok(openApi.body.paths['/downloads'].post.requestBody);
+    assert.ok(openApi.body.paths['/downloads/{id}'].delete);
 
     const apiDocs = await invokeHttp(httpHandler, 'GET', '/api-docs');
     assert.equal(apiDocs.statusCode, 200);
@@ -27,14 +28,18 @@ test('HTTP docs expose OpenAPI only at /api-docs', async () => {
     const config = await invokeHttp(httpHandler, 'GET', '/config');
     assert.equal(config.statusCode, 200);
     assert.equal(config.body.data.download.qualityStrategy, 'specified');
+    assert.equal(config.body.data.download.retryCount, 3);
+    assert.equal(config.body.data.download.retryIntervalMs, 5000);
 
     const updatedConfig = await invokeHttp(httpHandler, 'PATCH', '/config', {
-      download: { quality: '128k', qualityStrategy: 'lowest', sourceStrategy: 'all' }
+      download: { quality: '128k', qualityStrategy: 'lowest', sourceStrategy: 'all', retryCount: 2, retryIntervalMs: 250 }
     });
     assert.equal(updatedConfig.statusCode, 200);
     assert.equal(updatedConfig.body.data.download.quality, '128k');
     assert.equal(updatedConfig.body.data.download.qualityStrategy, 'lowest');
     assert.equal(updatedConfig.body.data.download.sourceStrategy, 'all');
+    assert.equal(updatedConfig.body.data.download.retryCount, 2);
+    assert.equal(updatedConfig.body.data.download.retryIntervalMs, 250);
 
     const docs = await invokeHttp(httpHandler, 'GET', '/docs');
     assert.equal(docs.statusCode, 404);

@@ -77,6 +77,7 @@ export const createHttpHandler = app => {
     { method: 'POST', path: '/downloads/:id/pause', handler: async ({ params }) => app.downloadService.pause(params.id) },
     { method: 'POST', path: '/downloads/:id/resume', handler: async ({ params }) => app.downloadService.resume(params.id) },
     { method: 'POST', path: '/downloads/:id/cancel', handler: async ({ params }) => app.downloadService.cancel(params.id) },
+    { method: 'DELETE', path: '/downloads/:id', handler: async ({ params }) => app.downloadService.delete(params.id) },
     { method: 'POST', path: '/downloads/:id/retry', handler: async ({ params }) => app.downloadService.retry(params.id) },
     { method: 'POST', path: '/metadata/embed', handler: async ({ body }) => app.metadataService.embed(body) }
   ];

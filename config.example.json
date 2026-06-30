@@ -19,6 +19,8 @@
     "maxConcurrency": 3,
     "resumeOnStartup": true,
     "skipExistingFile": true,
+    "retryCount": 3,
+    "retryIntervalMs": 5000,
     "quality": "320k",
     "qualityStrategy": "specified",
     "sourceStrategy": "specified",
