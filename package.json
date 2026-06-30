@@ -24,5 +24,9 @@
     "music",
     "api",
     "mcp"
-  ]
+  ],
+  "dependencies": {
+    "iconv-lite": "^0.6.3",
+    "smart-lyric": "1.0.4"
+  }
 }

@@ -11,7 +11,7 @@ import { createTools } from '../../src/server/mcp/tools.js';
 export const tempRoot = path.resolve('/tmp/music-hub-test');
 export const projectRoot = path.resolve(new URL('../..', import.meta.url).pathname);
 export const sourceRoot = path.join(projectRoot, 'data/sources');
-export const keyword = '海阔天空';
+export const keyword = '紅蓮華';
 export const builtinPlatforms = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
 export const realSourceFiles = fss.existsSync(sourceRoot)

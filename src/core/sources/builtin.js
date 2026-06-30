@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { AppError, ERROR_CODES } from '../../shared/errors.js';
 import { normalizeKeyword } from '../../shared/text.js';
 import { httpFetch } from '../../utils/request.js';
+import { getBuiltinLyric } from './lyrics/index.js';
 
 const defaultQualities = ['128k', '320k', 'flac', 'flac24bit'];
 
@@ -53,6 +54,28 @@ const singerNames = (singers, key = 'name') => Array.isArray(singers)
 const addType = (types, type, size, extra = {}) => {
   if (size === 0 || size === '0') return;
   types.push({ type, size: sizeFormat(size) || size || null, ...extra });
+};
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+export const qqSearchRetryDelay = (attempt, random = Math.random) => {
+  const base = 5000 * (2 ** Math.max(attempt - 1, 0));
+  const jitter = Math.floor(random() * 1000);
+  return Math.min(base + jitter, 30_000);
+};
+
+const withRetry = async (operation, { retries = 3, delay = qqSearchRetryDelay, wait = sleep, shouldRetry = () => true } = {}) => {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await operation(attempt);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= retries || !shouldRetry(error)) break;
+      await wait(delay(attempt + 1, Math.random));
+    }
+  }
+  throw lastError;
 };
 
 const searchKw = async ({ keyword, page, limit }) => {
@@ -122,7 +145,7 @@ const searchKg = async ({ keyword, page, limit }) => {
   return { list, allPage: Math.ceil(total / limit), total, limit, source: 'kg' };
 };
 
-const searchTx = async ({ keyword, page, limit }) => {
+const searchTxOnce = async ({ keyword, page, limit }) => {
   const response = await httpFetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
     method: 'post',
     headers: {
@@ -179,6 +202,10 @@ const searchTx = async ({ keyword, page, limit }) => {
       }
     }
   });
+  if (response.statusCode < 200 || response.statusCode >= 300) throw new Error(`QQ search HTTP ${response.statusCode}`);
+  if (response.body?.code !== 0 || response.body?.req?.code !== 0) {
+    throw new Error(`QQ search failed: ${response.body?.req?.code ?? response.body?.code ?? 'unknown'}`);
+  }
   const data = response.body?.req?.data || {};
   const rows = data.body?.item_song || [];
   const list = rows.map(item => {
@@ -207,6 +234,11 @@ const searchTx = async ({ keyword, page, limit }) => {
   const total = Number(data.meta?.estimate_sum || list.length || 0);
   return { list, allPage: Math.ceil(total / limit), total, limit, source: 'tx' };
 };
+
+export const searchTx = async options => withRetry(
+  () => searchTxOnce(options),
+  { retries: 3 }
+);
 
 const wyEapi = (url, object) => {
   const text = JSON.stringify(object);
@@ -338,7 +370,7 @@ const createBuiltinSource = definition => ({
   },
   async getLyric(songInfo) {
     if (!definition.capabilities.includes('lyric')) unsupported('lyric');
-    return { lyric: `[00:00.000]${songInfo?.name || ''}`, tlyric: '', rlyric: '', lxlyric: '', source: definition.id, raw: {} };
+    return getBuiltinLyric(definition.id, songInfo);
   },
   async getCover(songInfo) {
     if (!definition.capabilities.includes('cover')) unsupported('cover');
