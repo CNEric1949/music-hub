@@ -1,0 +1,30 @@
+services:
+  music-hub:
+    build:
+      context: .
+    image: music-hub:latest
+    container_name: music-hub
+    restart: unless-stopped
+    environment:
+      MUSIC_HUB_HOST: 0.0.0.0
+      MUSIC_HUB_PORT: 3000
+      MUSIC_HUB_MCP_HOST: 0.0.0.0
+      MUSIC_HUB_MCP_PORT: 3100
+      MUSIC_HUB_DATA_DIR: /app/data
+      MUSIC_HUB_SOURCES_DIR: /app/data/sources
+      MUSIC_HUB_DOWNLOAD_DIR: /app/data/downloads
+      MUSIC_HUB_CACHE_DIR: /app/data/cache
+      MUSIC_HUB_LOGS_DIR: /app/data/logs
+    ports:
+      - "${MUSIC_HUB_HTTP_PUBLISHED_PORT:-3000}:3000"
+      - "${MUSIC_HUB_MCP_PUBLISHED_PORT:-3100}:3100"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
