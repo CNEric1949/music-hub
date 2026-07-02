@@ -531,6 +531,8 @@ const rawMcpInputSchemas = {
     ]
   },
   delete_music_source: schemas.IdInput,
+  enable_music_source: schemas.IdInput,
+  disable_music_source: schemas.IdInput,
   reload_music_sources: schemas.SourceReloadInput,
   check_music_source_update: schemas.IdInput,
   search_music: schemas.SearchInput,

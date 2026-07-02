@@ -1,13 +1,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { AppError, ERROR_CODES } from '../../shared/errors.js';
-import { ensureDir, readJsonFile, safeJoin, writeJsonFile } from '../../shared/fs.js';
+import { ensureDir, safeJoin } from '../../shared/fs.js';
 import { sanitizeFileName } from '../../shared/text.js';
 import { httpFetch } from '../../utils/request.js';
 import { createBuiltinSources } from './builtin.js';
 import { loadCustomSourceScript } from './custom-runtime.js';
+import { SourceRegistryStore } from './registry-store.js';
 
 const SOURCE_FILE = 'sources.json';
+const SOURCE_DB_FILE = 'music-hub.sqlite';
 const SOURCE_FILE_EXTENSION = '.js';
 const DEFAULT_SOURCE_QUALITIES = ['128k', '192k', '320k', 'flac', 'flac24bit'];
 
@@ -39,6 +41,11 @@ export class SourceManager {
     this.config = config;
     this.logger = logger;
     this.registryPath = path.join(config.paths.dataDir, SOURCE_FILE);
+    this.registryStore = new SourceRegistryStore({
+      dbPath: path.join(config.paths.dataDir, SOURCE_DB_FILE),
+      legacyPath: this.registryPath,
+      logger
+    });
     this.sources = new Map();
     this.customRecords = [];
   }
@@ -46,7 +53,8 @@ export class SourceManager {
   async init() {
     await ensureDir(this.config.paths.sourcesDir);
     for (const source of createBuiltinSources()) this.sources.set(source.id, source);
-    this.customRecords = await readJsonFile(this.registryPath, []);
+    await this.registryStore.init();
+    this.customRecords = this.registryStore.loadAll();
     await this.discoverSourceFiles();
     if (this.config.sources.multiSourceEnabled) {
       await Promise.all(this.customRecords.map(record => this.loadCustomSource(record)));
@@ -76,7 +84,7 @@ export class SourceManager {
   }
 
   async saveRegistry() {
-    await writeJsonFile(this.registryPath, this.customRecords);
+    this.registryStore.saveAll(this.customRecords);
   }
 
   async discoverSourceFiles() {
@@ -200,7 +208,7 @@ export class SourceManager {
     this.sources.delete(id);
     this.customRecords.splice(index, 1);
     if (record.fileName) await fs.rm(safeJoin(this.config.paths.sourcesDir, record.fileName), { force: true });
-    await this.saveRegistry();
+    this.registryStore.delete(id);
     return { id, deleted: true };
   }
 
@@ -293,6 +301,7 @@ export class SourceManager {
           record.updateCheckedAt = new Date().toISOString();
           const source = this.sources.get(record.id);
           if (source) source.update = this.publicUpdateInfo(record);
+          void this.saveRegistry().catch(error => this.logger.warn?.(`source registry save failed: ${error.message}`));
         }
       });
       const updateInfo = this.normalizeUpdateInfo(api.__updateAlerts?.at?.(-1), api.__scriptInfo);

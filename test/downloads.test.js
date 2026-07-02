@@ -18,7 +18,7 @@ import {
 const realSource = getRealSource(file => file.includes('最新'));
 
 test('download task management works over HTTP and MCP', { skip: !realSource.path, timeout: 90000 }, async () => {
-  await withRealSourceEnv(async () => {
+  await withRealSourceEnv(async root => {
     const { httpHandler, mcpHandler } = await createTestHandlers();
     const firstSong = await searchFirstSong(httpHandler);
     const updatedConfig = await invokeHttp(httpHandler, 'PATCH', '/config', {
@@ -41,6 +41,8 @@ test('download task management works over HTTP and MCP', { skip: !realSource.pat
     assert.equal(downloadTask.body.data.sourceStrategy, 'all');
 
     const taskId = downloadTask.body.data.id;
+    assert.equal(await fspExists(path.join(root, 'data', 'music-hub.sqlite')), true);
+
     const taskDetail = await invokeHttp(httpHandler, 'GET', `/downloads/${taskId}`);
     assert.equal(taskDetail.statusCode, 200);
     assert.equal(taskDetail.body.data.id, taskId);
@@ -92,6 +94,43 @@ test('download task management works over HTTP and MCP', { skip: !realSource.pat
     assert.equal(mcpDownloadTask.result.structuredContent.status, 'waiting');
     assert.equal(mcpDownloadTask.result.structuredContent.qualityStrategy, 'lowest');
   }, { files: [realSource.fileName], root: `${tempRoot}-download-tasks` });
+});
+
+test('download tasks migrate from legacy JSON into SQLite storage', { timeout: 30000 }, async () => {
+  await withRealSourceEnv(async root => {
+    const legacyTask = {
+      id: 'legacy-download-task',
+      status: 'waiting',
+      musicInfo: { source: 'kw', name: '紅蓮華', singer: 'LiSA' },
+      quality: '128k',
+      qualityStrategy: 'specified',
+      sourceStrategy: 'specified',
+      platform: null,
+      provider: null,
+      url: null,
+      filePath: path.join(root, 'downloads', 'legacy.mp3'),
+      customFileName: true,
+      artifacts: {},
+      progress: { total: 0, downloaded: 0, percent: 0, speed: 0 },
+      attempts: 0,
+      maxRetries: 3,
+      retryIntervalMs: 5000,
+      options: { embedCover: false, saveCoverFile: false, embedLyric: false, saveLyricFile: false },
+      error: null,
+      createdAt: '2026-07-02T00:00:00.000Z',
+      updatedAt: '2026-07-02T00:00:00.000Z'
+    };
+    await fs.mkdir(path.join(root, 'data'), { recursive: true });
+    await fs.writeFile(path.join(root, 'data', 'download-tasks.json'), JSON.stringify([legacyTask], null, 2));
+
+    const { httpHandler } = await createTestHandlers();
+    const migrated = await invokeHttp(httpHandler, 'GET', '/downloads/legacy-download-task');
+    assert.equal(migrated.statusCode, 200);
+    assert.equal(migrated.body.data.id, legacyTask.id);
+    assert.equal(migrated.body.data.status, 'paused');
+    assert.equal(migrated.body.data.error.message, 'Paused after service restart');
+    assert.equal(await fspExists(path.join(root, 'data', 'music-hub.sqlite')), true);
+  }, { files: [], root: `${tempRoot}-download-sqlite-migration` });
 });
 
 test('local file download resumes and writes lyric and metadata artifacts', { skip: !realSource.path, timeout: 90000 }, async () => {
@@ -325,6 +364,69 @@ test('builtin cover download fetches a real cover for 紅蓮華', { timeout: 900
     assert.ok(stat.size > 1024, 'downloaded cover should contain image bytes');
     assert.equal(path.dirname(download.body.data.filePath), path.join(root, 'downloads'));
   }, { files: [], root: `${tempRoot}-cover-download` });
+});
+
+test('download task embeds real platform lyric and cover metadata for 紅蓮華', { timeout: 120000 }, async () => {
+  const audioBytes = Buffer.from([0xff, 0xfb, 0x90, 0x64, ...Buffer.from('music-hub real platform postprocess audio')]);
+  const server = http.createServer((req, res) => {
+    if (req.url.startsWith('/song.mp3')) {
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audioBytes.length });
+      res.end(audioBytes);
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    await withRealSourceEnv(async root => {
+      const { httpHandler } = await createTestHandlers();
+      const search = await invokeHttp(httpHandler, 'POST', '/music/search', { keyword, source: 'tx', page: 1, limit: 5 });
+      assert.equal(search.statusCode, 200);
+      const song = search.body.data.results[0].list.find(item => item.name === keyword && /LiSA/i.test(item.singer))
+        || search.body.data.results[0].list[0];
+
+      const created = await invokeHttp(httpHandler, 'POST', '/downloads', {
+        autoStart: false,
+        url: `http://127.0.0.1:${port}/song.mp3`,
+        fileName: 'gurenge-real-platform.mp3',
+        songInfo: song,
+        quality: '128k',
+        options: {
+          embedCover: true,
+          saveCoverFile: true,
+          embedLyric: true,
+          saveLyricFile: true,
+          mergeTranslatedLyric: true,
+          mergeRomanLyric: true,
+          mergeLxLyric: true
+        }
+      });
+      assert.equal(created.statusCode, 200);
+
+      const completed = await invokeHttp(httpHandler, 'POST', `/downloads/${created.body.data.id}/resume`);
+      assert.equal(completed.statusCode, 200);
+      assert.equal(completed.body.data.status, 'completed');
+      assert.equal(completed.body.data.artifacts.metadata.embedded, true);
+      assert.equal(completed.body.data.artifacts.metadata.lyricEmbedded, true);
+      assert.ok(await fspExists(completed.body.data.artifacts.cover));
+      assert.ok(await fspExists(completed.body.data.artifacts.lyrics.lyric));
+      assert.equal(path.dirname(completed.body.data.artifacts.cover), path.join(root, 'downloads'));
+
+      const coverStat = await fs.stat(completed.body.data.artifacts.cover);
+      assert.ok(coverStat.size > 1024, 'real platform cover should contain image bytes');
+      const lyricText = await fs.readFile(completed.body.data.artifacts.lyrics.lyric, 'utf8');
+      assert.match(lyricText, /紅蓮華|红莲华|gurenge/i);
+
+      const bytes = await fs.readFile(completed.body.data.filePath);
+      assert.equal(bytes.subarray(0, 3).toString('ascii'), 'ID3');
+      assert.ok(bytes.includes(Buffer.from('USLT')));
+      assert.ok(bytes.includes(Buffer.from('APIC')));
+    }, { files: [], root: `${tempRoot}-real-platform-postprocess` });
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
 });
 
 const searchFirstSong = async httpHandler => {

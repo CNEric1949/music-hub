@@ -17,7 +17,7 @@ const latestSource = getRealSource(file => file.includes('最新'));
 const upgradableSource = getRealSource(file => file.includes('可升级'));
 
 test('sources initialize concurrently and expose update prompt state', { skip: realSourceFiles.length < 2, timeout: 90000 }, async () => {
-  await withRealSourceEnv(async () => {
+  await withRealSourceEnv(async root => {
     const { httpHandler, mcpHandler } = await createTestHandlers();
 
     const response = await invokeHttp(httpHandler, 'GET', '/sources');
@@ -54,7 +54,35 @@ test('sources initialize concurrently and expose update prompt state', { skip: r
       params: { name: 'check_music_source_update', arguments: { id: upgradableSource.id } }
     });
     assert.equal(mcpUpdate.result.structuredContent.available, true);
+    assert.equal(await exists(path.join(root, 'data', 'music-hub.sqlite')), true);
+    assert.equal(await exists(path.join(root, 'data', 'sources.json')), false);
   }, { files: [latestSource.fileName, upgradableSource.fileName] });
+});
+
+test('source registry migrates from legacy JSON into SQLite storage', { skip: !latestSource.path, timeout: 90000 }, async () => {
+  await withRealSourceEnv(async root => {
+    const legacyRecord = {
+      id: latestSource.id,
+      name: latestSource.id,
+      type: 'custom',
+      enabled: false,
+      version: '0.0.0',
+      updateUrl: null,
+      fileName: latestSource.fileName,
+      discovered: true,
+      createdAt: '2026-07-02T00:00:00.000Z',
+      updatedAt: '2026-07-02T00:00:00.000Z'
+    };
+    await fs.mkdir(path.join(root, 'data'), { recursive: true });
+    await fs.writeFile(path.join(root, 'data', 'sources.json'), JSON.stringify([legacyRecord], null, 2));
+
+    const { httpHandler } = await createTestHandlers();
+    const detail = await invokeHttp(httpHandler, 'GET', `/sources/${encodeURIComponent(latestSource.id)}`);
+    assert.equal(detail.statusCode, 200);
+    assert.equal(detail.body.data.enabled, false);
+    assert.equal(detail.body.data.initialized, false);
+    assert.equal(await exists(path.join(root, 'data', 'music-hub.sqlite')), true);
+  }, { files: [latestSource.fileName], root: `${tempRoot}-source-sqlite-migration` });
 });
 
 test('sources support enable, disable, reload, and do not expose upgrade execution', { skip: !latestSource.path, timeout: 90000 }, async () => {
@@ -70,6 +98,24 @@ test('sources support enable, disable, reload, and do not expose upgrade executi
     assert.equal(enabled.statusCode, 200);
     assert.equal(enabled.body.data.enabled, true);
     assert.equal(enabled.body.data.initialized, true);
+
+    const mcpDisabled = await invokeMcp(mcpHandler, {
+      jsonrpc: '2.0',
+      id: 105,
+      method: 'tools/call',
+      params: { name: 'disable_music_source', arguments: { id: latestSource.id } }
+    });
+    assert.equal(mcpDisabled.result.structuredContent.enabled, false);
+    assert.equal(mcpDisabled.result.structuredContent.initialized, false);
+
+    const mcpEnabled = await invokeMcp(mcpHandler, {
+      jsonrpc: '2.0',
+      id: 106,
+      method: 'tools/call',
+      params: { name: 'enable_music_source', arguments: { id: latestSource.id } }
+    });
+    assert.equal(mcpEnabled.result.structuredContent.enabled, true);
+    assert.equal(mcpEnabled.result.structuredContent.initialized, true);
 
     const reloaded = await invokeHttp(httpHandler, 'POST', '/sources/reload', { id: latestSource.id });
     assert.equal(reloaded.statusCode, 200);

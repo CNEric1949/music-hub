@@ -32,7 +32,16 @@ test('real source search, match, media URL, lyric, cover, and detail capability 
 
     const mcpList = await invokeMcp(mcpHandler, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
     const toolNames = mcpList.result.tools.map(tool => tool.name);
-    for (const name of ['list_music_sources', 'get_music_source', 'search_music', 'match_music', 'get_music_url', 'create_download_task']) {
+    for (const name of [
+      'list_music_sources',
+      'get_music_source',
+      'enable_music_source',
+      'disable_music_source',
+      'search_music',
+      'match_music',
+      'get_music_url',
+      'create_download_task'
+    ]) {
       assert.ok(toolNames.includes(name), `MCP tool missing: ${name}`);
     }
     const mcpSearchTool = mcpList.result.tools.find(tool => tool.name === 'search_music');
@@ -144,6 +153,10 @@ test('real source search, match, media URL, lyric, cover, and detail capability 
       assert.ok(['song', 'album', 'resource', 'custom'].includes(coverResponse.body.data.sourceType));
     }
 
+    await assertRealDetail(httpHandler, source, firstSong, 'album');
+    await assertRealDetail(httpHandler, source, firstSong, 'singer');
+    await assertRealDetail(httpHandler, source, firstSong, 'detail');
+
     const unsupportedAlbum = await invokeHttp(httpHandler, 'POST', '/albums/detail', { source: 'wy', albumId: 'dummy' });
     assert.equal(unsupportedAlbum.statusCode, 422);
     assert.equal(unsupportedAlbum.body.error.code, 'SOURCE_CAPABILITY_UNSUPPORTED');
@@ -171,4 +184,37 @@ const hasResolvedUrl = value => {
   return Object.values(value).some(group =>
     Object.values(group).some(item => /^https?:\/\//.test(item?.url || ''))
   );
+};
+
+const assertRealDetail = async (httpHandler, source, song, capability) => {
+  if (!source.capabilities?.includes(capability)) return;
+  const routes = {
+    album: '/albums/detail',
+    singer: '/singers/detail',
+    detail: '/music/detail'
+  };
+  const payloads = {
+    album: {
+      source: song.source,
+      albumId: song.albumId || song.albumMid || song.album_id,
+      albumName: song.albumName,
+      songInfo: song
+    },
+    singer: {
+      source: song.source,
+      singerId: song.singerId || song.singerMid || song.singer_mid,
+      singer: song.singer,
+      songInfo: song
+    },
+    detail: {
+      source: song.source,
+      songInfo: song
+    }
+  };
+  const response = await invokeHttp(httpHandler, 'POST', routes[capability], payloads[capability]);
+  assert.equal(response.statusCode, 200, JSON.stringify(response.body, null, 2));
+  assert.equal(response.body.ok, true);
+  assert.equal(typeof response.body.data, 'object');
+  assert.ok(Object.keys(response.body.data || {}).length > 0, `${capability} detail should return data`);
+  console.log(`[detail:http] ${capability} source=${song.source}`);
 };

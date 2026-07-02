@@ -36,6 +36,16 @@ export const createTools = app => ({
     inputSchema: mcpInputSchemas.delete_music_source,
     handler: async ({ id }) => app.sourceManager.delete(id)
   },
+  enable_music_source: {
+    description: 'Enable a custom music source.',
+    inputSchema: mcpInputSchemas.enable_music_source,
+    handler: async ({ id }) => app.sourceManager.enable(id, true)
+  },
+  disable_music_source: {
+    description: 'Disable a custom music source.',
+    inputSchema: mcpInputSchemas.disable_music_source,
+    handler: async ({ id }) => app.sourceManager.enable(id, false)
+  },
   reload_music_sources: {
     description: 'Reload music sources.',
     inputSchema: mcpInputSchemas.reload_music_sources,
