@@ -1,6 +1,20 @@
+import { randomUUID } from 'node:crypto';
 import http from 'node:http';
-import { toErrorBody } from '../../shared/errors.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import {
+  CallToolRequestSchema,
+  ErrorCode,
+  isInitializeRequest,
+  ListToolsRequestSchema,
+  McpError
+} from '@modelcontextprotocol/sdk/types.js';
 import { createTools, listTools } from './tools.js';
+
+const SERVER_INFO = { name: 'music-hub', version: '0.1.0' };
+const SSE_MESSAGE_ENDPOINT = '/messages';
 
 const readJson = async req => {
   const chunks = [];
@@ -9,9 +23,9 @@ const readJson = async req => {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 };
 
-const sendJson = (res, body) => {
+const sendJson = (res, body, status = 200) => {
   const data = JSON.stringify(body);
-  res.writeHead(200, {
+  res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(data)
   });
@@ -59,62 +73,189 @@ export const createMcpDocsHtml = tools => {
 </html>`;
 };
 
-const rpcResult = (id, result) => ({ jsonrpc: '2.0', id, result });
-const rpcError = (id, error) => ({
-  jsonrpc: '2.0',
-  id,
-  error: {
-    code: -32000,
-    message: error.error?.message || 'Tool error',
-    data: error.error || error
-  }
-});
+export const createProtocolServer = tools => {
+  const server = new Server(SERVER_INFO, {
+    capabilities: {
+      tools: {}
+    },
+    instructions: 'Use music-hub tools to manage LX music sources, search music, resolve URLs, fetch lyrics/covers, and manage downloads.'
+  });
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: listTools(tools)
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, async request => {
+    const tool = tools[request.params.name];
+    if (!tool) throw new McpError(ErrorCode.MethodNotFound, `Tool not found: ${request.params.name}`);
+    try {
+      const result = await tool.handler(request.params.arguments || {});
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        structuredContent: result && typeof result === 'object' && !Array.isArray(result)
+          ? result
+          : { result }
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: error.message || String(error) }],
+        isError: true,
+        structuredContent: {
+          code: error.code || 'TOOL_ERROR',
+          message: error.message || String(error),
+          details: error.details || {}
+        }
+      };
+    }
+  });
+
+  return server;
+};
 
 export const startMcpServer = app => new Promise(resolve => {
   const tools = createTools(app);
-  const server = http.createServer(createMcpHandler(tools));
+  const handler = createMcpHandler(tools);
+  const server = http.createServer(handler);
 
   server.listen(app.config.server.mcpPort, app.config.server.mcpHost, () => {
-    console.log(`[MCP] listening on http://${app.config.server.mcpHost}:${app.config.server.mcpPort}/mcp`);
+    const address = server.address();
+    const host = typeof address === 'object' && address ? address.address : app.config.server.mcpHost;
+    const port = typeof address === 'object' && address ? address.port : app.config.server.mcpPort;
+    console.log(`[MCP] listening on http://${host}:${port}/mcp`);
     resolve(server);
   });
 });
 
-export const createMcpHandler = tools => async (req, res) => {
+export const startStdioMcpServer = async app => {
+  const tools = createTools(app);
+  const server = createProtocolServer(tools);
+  await server.connect(new StdioServerTransport());
+};
+
+export const createMcpHandler = tools => {
+  const transports = new Map();
+  const servers = new Map();
+
+  const connectTransport = async (transport, sessionId) => {
+    const server = createProtocolServer(tools);
+    if (sessionId) servers.set(sessionId, server);
+    await server.connect(transport);
+    return server;
+  };
+
+  const handleLegacySse = async (req, res) => {
+    const transport = new SSEServerTransport(SSE_MESSAGE_ENDPOINT, res);
+    transports.set(transport.sessionId, transport);
+    transport.onclose = () => {
+      transports.delete(transport.sessionId);
+      const server = servers.get(transport.sessionId);
+      servers.delete(transport.sessionId);
+      void server?.close?.();
+    };
+    await connectTransport(transport, transport.sessionId);
+  };
+
+  const handleLegacyMessage = async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
-    if (req.method === 'GET' && url.pathname === '/mcp/tools') {
-      sendJson(res, { tools: listTools(tools) });
+    const sessionId = url.searchParams.get('sessionId');
+    const transport = sessionId ? transports.get(sessionId) : null;
+    if (!(transport instanceof SSEServerTransport)) {
+      sendJson(res, {
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'No SSE transport found for sessionId' },
+        id: null
+      }, 400);
       return;
     }
-    if (req.method === 'GET' && url.pathname === '/mcp/docs') {
-      sendHtml(res, createMcpDocsHtml(tools));
+    const body = await readJson(req);
+    await transport.handlePostMessage(req, res, body);
+  };
+
+  const handleStreamableHttp = async (req, res) => {
+    const body = req.method === 'POST' ? await readJson(req) : undefined;
+    const sessionId = req.headers['mcp-session-id'];
+    let transport = sessionId ? transports.get(sessionId) : null;
+
+    if (transport && !(transport instanceof StreamableHTTPServerTransport)) {
+      sendJson(res, {
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'Session exists but uses a different transport protocol' },
+        id: null
+      }, 400);
       return;
     }
-    if (url.pathname !== '/mcp' || req.method !== 'POST') {
+
+    if (!transport) {
+      if (req.method !== 'POST' || !isInitializeRequest(body)) {
+        sendJson(res, {
+          jsonrpc: '2.0',
+          error: { code: -32000, message: 'No valid MCP session. Send initialize with POST /mcp first, or use SSE with GET /mcp.' },
+          id: null
+        }, 400);
+        return;
+      }
+
+      let protocolServer;
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: id => {
+          transports.set(id, transport);
+          if (protocolServer) servers.set(id, protocolServer);
+        }
+      });
+      transport.onclose = () => {
+        const id = transport.sessionId;
+        if (!id) return;
+        transports.delete(id);
+        const server = servers.get(id);
+        servers.delete(id);
+        void server?.close?.();
+      };
+      protocolServer = await connectTransport(transport);
+    }
+
+    await transport.handleRequest(req, res, body);
+  };
+
+  return async (req, res) => {
+    try {
+      const url = new URL(req.url, 'http://localhost');
+
+      if (req.method === 'GET' && url.pathname === '/mcp/tools') {
+        sendJson(res, { tools: listTools(tools) });
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/mcp/docs') {
+        sendHtml(res, createMcpDocsHtml(tools));
+        return;
+      }
+      if ((url.pathname === '/sse' && req.method === 'GET') ||
+          (url.pathname === '/mcp' && req.method === 'GET' && !req.headers['mcp-session-id'])) {
+        await handleLegacySse(req, res);
+        return;
+      }
+      if (url.pathname === SSE_MESSAGE_ENDPOINT && req.method === 'POST') {
+        await handleLegacyMessage(req, res);
+        return;
+      }
+      if (url.pathname === '/mcp' && ['GET', 'POST', 'DELETE'].includes(req.method)) {
+        await handleStreamableHttp(req, res);
+        return;
+      }
+
       res.writeHead(404);
       res.end();
-      return;
-    }
-    try {
-      const body = await readJson(req);
-      if (body.method === 'tools/list') {
-        sendJson(res, rpcResult(body.id, {
-          tools: listTools(tools)
-        }));
-        return;
-      }
-      if (body.method === 'tools/call') {
-        const tool = tools[body.params?.name];
-        if (!tool) throw new Error(`Tool not found: ${body.params?.name}`);
-        const result = await tool.handler(body.params?.arguments || {});
-        sendJson(res, rpcResult(body.id, {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          structuredContent: result
-        }));
-        return;
-      }
-      sendJson(res, rpcResult(body.id, { server: 'music-hub', methods: ['tools/list', 'tools/call'] }));
     } catch (error) {
-      sendJson(res, rpcError(null, toErrorBody(error)));
+      if (!res.headersSent) {
+        sendJson(res, {
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: error.message || 'Internal server error'
+          },
+          id: null
+        }, 500);
+      }
     }
   };
+};

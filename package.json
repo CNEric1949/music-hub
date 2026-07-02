@@ -12,6 +12,7 @@
     "start": "node src/index.js",
     "start:http": "node src/index.js http",
     "start:mcp": "node src/index.js mcp",
+    "start:stdio": "node src/index.js stdio",
     "start:all": "node src/index.js all",
     "test": "node --test \"test/*.test.js\"",
     "check": "node --check src/index.js"
@@ -26,8 +27,10 @@
     "mcp"
   ],
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "iconv-lite": "^0.6.3",
     "node-id3": "^0.2.9",
-    "smart-lyric": "1.0.4"
+    "smart-lyric": "1.0.4",
+    "zod": "^4.4.3"
   }
 }

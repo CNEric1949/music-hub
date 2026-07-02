@@ -113,8 +113,14 @@ export const createTools = app => ({
   }
 });
 
+const normalizeInputSchema = schema => {
+  if (!schema) return { type: 'object' };
+  if (schema.type === 'object') return schema;
+  return { ...schema, type: 'object' };
+};
+
 export const listTools = tools => Object.entries(tools).map(([name, tool]) => ({
   name,
   description: tool.description,
-  inputSchema: tool.inputSchema || { type: 'object' }
+  inputSchema: normalizeInputSchema(tool.inputSchema)
 }));

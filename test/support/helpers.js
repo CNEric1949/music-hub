@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import fss from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { createApp } from '../../src/app.js';
@@ -56,7 +57,7 @@ export const createTestHandlers = async () => {
   };
 };
 
-export const invokeHttp = async (handler, method, url, body) => {
+export const invokeHttp = async (handler, method, url, body, headers = {}) => {
   const chunks = [];
   const req = new Readable({
     read() {
@@ -69,7 +70,7 @@ export const invokeHttp = async (handler, method, url, body) => {
   });
   req.method = method;
   req.url = url;
-  req.headers = { host: 'localhost', 'content-type': 'application/json' };
+  req.headers = { host: 'localhost', 'content-type': 'application/json', ...headers };
 
   const res = new Writable({
     write(chunk, _encoding, callback) {
@@ -94,10 +95,89 @@ export const invokeHttp = async (handler, method, url, body) => {
   return { statusCode: res.statusCode, headers: res.headers, body: parsedBody };
 };
 
+const mcpSessions = new WeakMap();
+
+const listenOnLoopback = server => new Promise((resolve, reject) => {
+  server.once('error', reject);
+  server.listen(0, '127.0.0.1', () => {
+    server.off('error', reject);
+    server.unref();
+    resolve();
+  });
+});
+
+const readFetchJson = async response => {
+  const text = await response.text();
+  if (text.startsWith('event:')) {
+    const data = text
+      .split('\n')
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice('data:'.length).trimStart())
+      .join('\n');
+    return data ? JSON.parse(data) : null;
+  }
+  return text ? JSON.parse(text) : null;
+};
+
+const mcpHeaders = sessionId => ({
+  Accept: 'application/json, text/event-stream',
+  'Content-Type': 'application/json',
+  ...(sessionId ? { 'Mcp-Session-Id': sessionId } : {})
+});
+
+const getMcpSession = async handler => {
+  const existing = mcpSessions.get(handler);
+  if (existing) return existing;
+
+  const server = http.createServer(handler);
+  await listenOnLoopback(server);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const initResponse = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: mcpHeaders(),
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'init',
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-11-25',
+        capabilities: {},
+        clientInfo: { name: 'music-hub-test', version: '0.0.0' }
+      }
+    })
+  });
+  assert.equal(initResponse.status, 200);
+  const sessionId = initResponse.headers.get('mcp-session-id');
+  assert.ok(sessionId, 'MCP initialize response should include mcp-session-id');
+  await readFetchJson(initResponse);
+
+  const initializedResponse = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: mcpHeaders(sessionId),
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notifications/initialized'
+    })
+  });
+  assert.ok([200, 202].includes(initializedResponse.status));
+  await initializedResponse.text();
+
+  const session = { baseUrl, sessionId, server };
+  mcpSessions.set(handler, session);
+  return session;
+};
+
 export const invokeMcp = async (handler, payload) => {
-  const response = await invokeHttp(handler, 'POST', '/mcp', payload);
-  assert.equal(response.statusCode, 200);
-  return response.body;
+  const session = await getMcpSession(handler);
+  const response = await fetch(`${session.baseUrl}/mcp`, {
+    method: 'POST',
+    headers: mcpHeaders(session.sessionId),
+    body: JSON.stringify(payload)
+  });
+  const body = await readFetchJson(response);
+  assert.equal(response.status, 200);
+  return body;
 };
 
 export const fspExists = async target => {
