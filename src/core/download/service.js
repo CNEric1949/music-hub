@@ -9,7 +9,6 @@ import { DownloadTaskStore } from './task-store.js';
 import { ensureDir, pathExists, safeJoin } from '../../shared/fs.js';
 import { extForQuality, sanitizeFileName } from '../../shared/text.js';
 
-const TASKS_FILE = 'download-tasks.json';
 const TASKS_DB_FILE = 'music-hub.sqlite';
 const terminalStatuses = new Set(['completed', 'canceled']);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
@@ -25,10 +24,8 @@ export class DownloadService {
     this.searchService = searchService;
     this.metadataService = metadataService;
     this.logger = logger;
-    this.tasksPath = path.join(config.paths.dataDir, TASKS_FILE);
     this.taskStore = new DownloadTaskStore({
       dbPath: path.join(config.paths.dataDir, TASKS_DB_FILE),
-      legacyPath: this.tasksPath,
       logger
     });
     this.tasks = new Map();

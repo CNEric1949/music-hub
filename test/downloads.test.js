@@ -96,43 +96,6 @@ test('download task management works over HTTP and MCP', { skip: !realSource.pat
   }, { files: [realSource.fileName], root: `${tempRoot}-download-tasks` });
 });
 
-test('download tasks migrate from legacy JSON into SQLite storage', { timeout: 30000 }, async () => {
-  await withRealSourceEnv(async root => {
-    const legacyTask = {
-      id: 'legacy-download-task',
-      status: 'waiting',
-      musicInfo: { source: 'kw', name: '紅蓮華', singer: 'LiSA' },
-      quality: '128k',
-      qualityStrategy: 'specified',
-      sourceStrategy: 'specified',
-      platform: null,
-      provider: null,
-      url: null,
-      filePath: path.join(root, 'downloads', 'legacy.mp3'),
-      customFileName: true,
-      artifacts: {},
-      progress: { total: 0, downloaded: 0, percent: 0, speed: 0 },
-      attempts: 0,
-      maxRetries: 3,
-      retryIntervalMs: 5000,
-      options: { embedCover: false, saveCoverFile: false, embedLyric: false, saveLyricFile: false },
-      error: null,
-      createdAt: '2026-07-02T00:00:00.000Z',
-      updatedAt: '2026-07-02T00:00:00.000Z'
-    };
-    await fs.mkdir(path.join(root, 'data'), { recursive: true });
-    await fs.writeFile(path.join(root, 'data', 'download-tasks.json'), JSON.stringify([legacyTask], null, 2));
-
-    const { httpHandler } = await createTestHandlers();
-    const migrated = await invokeHttp(httpHandler, 'GET', '/downloads/legacy-download-task');
-    assert.equal(migrated.statusCode, 200);
-    assert.equal(migrated.body.data.id, legacyTask.id);
-    assert.equal(migrated.body.data.status, 'paused');
-    assert.equal(migrated.body.data.error.message, 'Paused after service restart');
-    assert.equal(await fspExists(path.join(root, 'data', 'music-hub.sqlite')), true);
-  }, { files: [], root: `${tempRoot}-download-sqlite-migration` });
-});
-
 test('local file download resumes and writes lyric and metadata artifacts', { skip: !realSource.path, timeout: 90000 }, async () => {
   await withRealSourceEnv(async root => {
     const { httpHandler } = await createTestHandlers();

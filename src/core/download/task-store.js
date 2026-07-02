@@ -1,13 +1,12 @@
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { ensureDir, readJsonFile } from '../../shared/fs.js';
+import { ensureDir } from '../../shared/fs.js';
 
 const TASK_TABLE = 'download_tasks';
 
 export class DownloadTaskStore {
-  constructor({ dbPath, legacyPath, logger = console }) {
+  constructor({ dbPath, logger = console }) {
     this.dbPath = dbPath;
-    this.legacyPath = legacyPath;
     this.logger = logger;
     this.db = null;
   }
@@ -24,27 +23,6 @@ export class DownloadTaskStore {
         task_json TEXT NOT NULL
       )
     `);
-    await this.migrateLegacyJson();
-  }
-
-  async migrateLegacyJson() {
-    if (!this.legacyPath) return;
-    const tasks = await readJsonFile(this.legacyPath, []);
-    if (!Array.isArray(tasks) || !tasks.length) return;
-    const insert = this.db.prepare(`
-      INSERT OR IGNORE INTO ${TASK_TABLE} (id, status, created_at, updated_at, task_json)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    for (const task of tasks) {
-      if (!task?.id) continue;
-      insert.run(
-        task.id,
-        task.status || 'waiting',
-        task.createdAt || null,
-        task.updatedAt || null,
-        JSON.stringify(task)
-      );
-    }
   }
 
   loadAll() {
