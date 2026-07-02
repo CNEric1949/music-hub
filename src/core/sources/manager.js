@@ -8,7 +8,6 @@ import { createBuiltinSources } from './builtin.js';
 import { loadCustomSourceScript } from './custom-runtime.js';
 import { SourceRegistryStore } from './registry-store.js';
 
-const SOURCE_FILE = 'sources.json';
 const SOURCE_DB_FILE = 'music-hub.sqlite';
 const SOURCE_FILE_EXTENSION = '.js';
 const DEFAULT_SOURCE_QUALITIES = ['128k', '192k', '320k', 'flac', 'flac24bit'];
@@ -40,10 +39,8 @@ export class SourceManager {
   constructor(config, logger = console) {
     this.config = config;
     this.logger = logger;
-    this.registryPath = path.join(config.paths.dataDir, SOURCE_FILE);
     this.registryStore = new SourceRegistryStore({
       dbPath: path.join(config.paths.dataDir, SOURCE_DB_FILE),
-      legacyPath: this.registryPath,
       logger
     });
     this.sources = new Map();

@@ -1,13 +1,12 @@
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { ensureDir, readJsonFile } from '../../shared/fs.js';
+import { ensureDir } from '../../shared/fs.js';
 
 const SOURCE_TABLE = 'music_sources';
 
 export class SourceRegistryStore {
-  constructor({ dbPath, legacyPath, logger = console }) {
+  constructor({ dbPath, logger = console }) {
     this.dbPath = dbPath;
-    this.legacyPath = legacyPath;
     this.logger = logger;
     this.db = null;
   }
@@ -26,33 +25,11 @@ export class SourceRegistryStore {
       )
     `);
     this.ensureColumns();
-    await this.migrateLegacyJson();
   }
 
   ensureColumns() {
     const columns = new Set(this.db.prepare(`PRAGMA table_info(${SOURCE_TABLE})`).all().map(column => column.name));
     if (!columns.has('created_at')) this.db.exec(`ALTER TABLE ${SOURCE_TABLE} ADD COLUMN created_at TEXT`);
-  }
-
-  async migrateLegacyJson() {
-    if (!this.legacyPath) return;
-    const records = await readJsonFile(this.legacyPath, []);
-    if (!Array.isArray(records) || !records.length) return;
-    const insert = this.db.prepare(`
-      INSERT OR IGNORE INTO ${SOURCE_TABLE} (id, file_name, enabled, created_at, updated_at, record_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    for (const record of records) {
-      if (!record?.id) continue;
-      insert.run(
-        record.id,
-        record.fileName || null,
-        record.enabled === false ? 0 : 1,
-        record.createdAt || null,
-        record.updatedAt || null,
-        JSON.stringify(record)
-      );
-    }
   }
 
   loadAll() {
